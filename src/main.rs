@@ -17,6 +17,9 @@ enum Op {
     Sub,
     Eq, // pop stack twice - push 1 or 0
     Gt, // greater than
+    Lt, // less than
+    Gteq, // >=
+    Lteq, // <=
     Out, // pop stack - print to console
     Dup, // Duplicate value on the top of the stack
     If(usize), // pop stack - if 0 jump to end, otherwise proceed
@@ -88,6 +91,9 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
             "-" => tokens.push(Op::Sub),
             "=" => tokens.push(Op::Eq),
             ">" => tokens.push(Op::Gt),
+            "<" => tokens.push(Op::Lt),
+            ">=" => tokens.push(Op::Gteq),
+            "<=" => tokens.push(Op::Lteq),
             "out" => tokens.push(Op::Out),
             "dup" => tokens.push(Op::Dup),
             "if" => {
@@ -190,6 +196,15 @@ fn run(program: &Vec<Op>, mut s: &mut Vec<V>) -> Vec<V> {
             }
             Op::Gt => {
                 OP_GT(s);
+            }
+            Op::Lt => {
+                OP_LT(s);
+            }
+            Op::Gteq => {
+                OP_GTEQ(s);
+            }
+            Op::Lteq => {
+                OP_LTEQ(s);
             }
             Op::Out => {
                 OP_OUT(s);

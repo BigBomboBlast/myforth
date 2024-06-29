@@ -6,7 +6,7 @@
 // Any negative number or any number above 255 is an i32
 // Any decimal number is a float
 
-// as long as adding/subtracting values is in between 0 and 255 they should result in u8 types
+// as long as result of adding/subtracting values is in between 0 and 255 they should result in u8 types
 // and any operation involving floats will always result in a float
 use std::fmt;
 use std::ops::{Add, Sub};
@@ -29,9 +29,8 @@ impl fmt::Display for V {
     }
 }
 
-// if there is a better way of implementing these traits pls let me know
-// I think this will make it so that I don't have to wrory about destructuring when implementing
-// the instructions
+// This will make it so that the basic `+` and `-` will work on the any of the V enum variants
+// it handles the destructuring and type conversions automatically
 impl Add for V {
     type Output = V;
     fn add(self, other: V) -> V {
@@ -118,37 +117,48 @@ impl Sub for V {
 }
 
 impl PartialEq for V {
+    // NOTE: this takes referencces to the values in a comparison, 
+    // that way I don't have to think about whether `==` takes ownership of the values
+    // sounds like it'd be janky if it did
     fn eq(&self, other: &V) -> bool {
+        // self is the left value type, other is the right value type in an equality check
         match (self, other) {
-            (V::I(lhs), V::I(rhs)) => lhs == rhs,
-            (V::I(lhs), V::F(rhs)) => (*lhs as f32) == *rhs,
-            (V::I(lhs), V::B(rhs)) => *lhs == (*rhs as i32),
+            (V::I(left), V::I(right)) => left == right,
+            // you have to dereference in order to do the type conversion
+            // otherwise I believe you are converting the literal reference and not the value
+            (V::I(left), V::F(right)) => (*left as f32) == *right,
+            (V::I(left), V::B(right)) => *left == (*right as i32),
 
-            (V::F(lhs), V::I(rhs)) => *lhs == (*rhs as f32),
-            (V::F(lhs), V::F(rhs)) => lhs == rhs,
-            (V::F(lhs), V::B(rhs)) => *lhs == (*rhs as f32),
+            (V::F(left), V::I(right)) => *left == (*right as f32),
+            (V::F(left), V::F(right)) => left == right,
+            (V::F(left), V::B(right)) => *left == (*right as f32),
 
-            (V::B(lhs), V::I(rhs)) => (*lhs as i32) == *rhs,
-            (V::B(lhs), V::F(rhs)) => (*lhs as f32) == *rhs,
-            (V::B(lhs), V::B(rhs)) => lhs == rhs,
+            (V::B(left), V::I(right)) => (*left as i32) == *right,
+            (V::B(left), V::F(right)) => (*left as f32) == *right,
+            (V::B(left), V::B(right)) => left == right,
         }
     }
 }
 
 impl PartialOrd for V {
+    // same thing, takes references to the values in the comparison
     fn partial_cmp(&self, other: &V) -> Option<Ordering> {
+        // partial_cmp returns an Option<Ordering>
+        // Ordering is an enum that contains if the left value was greater than/less than... whatever
         match (self, other) {
-            (V::I(lhs), V::I(rhs)) => lhs.partial_cmp(rhs),
-            (V::I(lhs), V::F(rhs)) => (*lhs as f32).partial_cmp(rhs),
-            (V::I(lhs), V::B(rhs)) => lhs.partial_cmp(&(*rhs as i32)),
+            (V::I(left), V::I(right)) => left.partial_cmp(right),
+            (V::I(left), V::F(right)) => (*left as f32).partial_cmp(right),
+            // dereferenes to the the type conversion, then the partial_cmp will take reference to
+            // the converted value
+            (V::I(left), V::B(right)) => left.partial_cmp(&(*right as i32)),
 
-            (V::F(lhs), V::I(rhs)) => lhs.partial_cmp(&(*rhs as f32)),
-            (V::F(lhs), V::F(rhs)) => lhs.partial_cmp(rhs),
-            (V::F(lhs), V::B(rhs)) => lhs.partial_cmp(&(*rhs as f32)),
+            (V::F(left), V::I(right)) => left.partial_cmp(&(*right as f32)),
+            (V::F(left), V::F(right)) => left.partial_cmp(right),
+            (V::F(left), V::B(right)) => left.partial_cmp(&(*right as f32)),
 
-            (V::B(lhs), V::I(rhs)) => (*lhs as i32).partial_cmp(rhs),
-            (V::B(lhs), V::F(rhs)) => (*lhs as f32).partial_cmp(rhs),
-            (V::B(lhs), V::B(rhs)) => lhs.partial_cmp(rhs),
+            (V::B(left), V::I(right)) => (*left as i32).partial_cmp(right),
+            (V::B(left), V::F(right)) => (*left as f32).partial_cmp(right),
+            (V::B(left), V::B(right)) => left.partial_cmp(right),
         }
     }
 }
