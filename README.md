@@ -4,15 +4,15 @@ I wanted to create my own custom programming language from scratch. I think some
 
 ## STATE OF PROJECT RN
 
-There is a basic REPL that will read commands and print the stack as well as how the program is being tokenized. That's it, later on i'll make it so that you can read from files. 
+There is a basic REPL that will read commands and print the stack as well as how the program is being tokenized.
 
-You can do conditional branching with if-else statements, and while loops work as well. You can now have floats, integers, and characters onto the stack. 
+You can do conditional branching with if-else statements, and while loops work as well. You can now have floats, integers, and characters onto the stack. You are also given 1kb of memory to read and write to, and can do pointer arithmetic and stuff. 
 
 ## TODO
 
 This is extreme work in progress and these are my plans:
 
-- Make it so that you can read and write to memory
+- clean up the code at is it a little buggy and doesn't make too much sense
 - Implement some kind of procedures/functions
 - Make string literals work
 - Add comments

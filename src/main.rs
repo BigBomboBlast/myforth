@@ -10,7 +10,7 @@ pub use operations::*;
 
 #[derive(Debug)]
 enum Op {
-    PushB(u8),
+    PushU(usize),
     PushI(i32),
     PushF(f32),
     Add,
@@ -20,8 +20,11 @@ enum Op {
     Lt, // less than
     Gteq, // >=
     Lteq, // <=
-    Out, // pop stack - print to console
     Dup, // Duplicate value on the top of the stack
+    Out, // pop stack - print to console
+    Mem, // push address of the beggining of memory
+    Read, // pop stack, expecting a memory address, push value contained at that memory address
+    Write, // pop stack twice, expecting a memory address and value, store value at memory address
     If(usize), // pop stack - if 0 jump to end, otherwise proceed
     Else(usize), // unconditional jump instruction
     End(usize), // unconditional jump instruction
@@ -79,8 +82,8 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
     let is_float = |w: &str| w.parse::<f32>().is_ok();
     let to_float = |w: &str| w.parse::<f32>().unwrap();
 
-    let is_byte = |w: &str| w.parse::<u8>().is_ok();
-    let to_byte = |w: &str| w.parse::<u8>().unwrap();
+    let is_usize = |w: &str| w.parse::<usize>().is_ok();
+    let to_usize = |w: &str| w.parse::<usize>().unwrap();
 
     let mut jump_locations: Vec<usize> = vec![];
     let mut tokens: Vec<Op> = vec![];
@@ -96,6 +99,9 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
             "<=" => tokens.push(Op::Lteq),
             "out" => tokens.push(Op::Out),
             "dup" => tokens.push(Op::Dup),
+            "mem" => tokens.push(Op::Mem),
+            "read" => tokens.push(Op::Read),
+            "write" => tokens.push(Op::Write),
             "if" => {
                 tokens.push(Op::If(0));
                 jump_locations.push(i);
@@ -157,7 +163,7 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
                 tokens.push(Op::Do(0));
                 jump_locations.push(i);
             }
-            w if is_byte(w) => tokens.push(Op::PushB(to_byte(w))),
+            w if is_usize(w) => tokens.push(Op::PushU(to_usize(w))),
             w if is_int(w) => tokens.push(Op::PushI(to_int(w))),
             w if is_float(w) => tokens.push(Op::PushF(to_float(w))),
             _ => panic!("{}:{} Unknown Word `{}` Encountered", line, col, word),
@@ -177,14 +183,14 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
     return tokens;
 }
 
-fn run(program: &Vec<Op>, mut s: &mut Vec<V>) -> Vec<V> {
+fn run(program: &Vec<Op>, s: &mut Vec<V>, mem: *mut u8) -> Vec<V> {
     // `ip` stands for `instruction pointer`
     let mut ip = 0;
     while ip < program.len() {
         match program[ip] {
             Op::PushI(n) => s.push(V::I(n)),
             Op::PushF(f) => s.push(V::F(f)),
-            Op::PushB(b) => s.push(V::B(b)),
+            Op::PushU(u) => s.push(V::U(u)),
             Op::Add => {
                 OP_ADD(s);
             }
@@ -212,9 +218,27 @@ fn run(program: &Vec<Op>, mut s: &mut Vec<V>) -> Vec<V> {
             Op:: Dup => {
                 OP_DUP(s);
             }
+            Op::Mem => {
+                s.push(V::U(mem as usize));
+            }
+            Op::Read => unsafe {
+                let V::U(addr) = s.pop().expect("stack underflow") else {
+                    panic!("`Read` expected a possible memory location, got a float/negative value")
+                };
+                s.push(V::U(*(addr as *mut u8) as usize));
+            } 
+            Op::Write => unsafe {
+                let V::U(addr) = s.pop().expect("stack underflow") else {
+                    panic!("`write` expected a possible memory location, got a float/negative value")
+                };
+                let V::U(val) = s.pop().expect("stack underflow") else {
+                    panic!("cannot write negative/float to memory - yet")
+                };
+                *(addr as *mut u8) = val as u8;
+            }
             Op::If(label) => {
                 let x = s.pop().expect("stack underflow");
-                if x == V::B(0) { // condition is false
+                if x == V::U(0) { // condition is false
                     // jump to label
                     ip = label;
                 }
@@ -224,7 +248,7 @@ fn run(program: &Vec<Op>, mut s: &mut Vec<V>) -> Vec<V> {
             Op::While => (), // doesnt do anything, just a label to jump to
             Op::Do(label) => {
                 let x = s.pop().expect("stack underflow");
-                if x == V::B(0) { // loop condition is false
+                if x == V::U(0) { // loop condition is false
                     ip = label // jump to end
                 }
             }
@@ -241,6 +265,9 @@ fn main() {
         let mut input = String::new();
         let mut stack: Vec<V> = vec![];
 
+        let layout = Layout::from_size_align(1000, 1).unwrap(); // should be enough for me
+        let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
+
         loop {
             print!("\n>> "); // prompt
             io::stdout().flush().unwrap();
@@ -248,7 +275,7 @@ fn main() {
                        .expect("failed"); // read input to buffer
             
             let tokens: Vec<Op> = tokenize(&parse_to_words(&input));
-            run(&tokens, &mut stack);
+            run(&tokens, &mut stack, mem);
             show_stack_debug(&stack);
             input.clear();
         }
@@ -258,8 +285,11 @@ fn main() {
         file.read_to_string(&mut source).expect("Failed to read file.");
 
         let mut stack: Vec<V> = vec![];
+        let layout = Layout::from_size_align(1000, 1).unwrap(); // is enough for me
+        let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
+        
         let tokens: Vec<Op> = tokenize(&parse_to_words(&source));
-        run(&tokens, &mut stack);
+        run(&tokens, &mut stack, mem);
         show_stack(&stack);
     } else {
         println!("calm down there buddy, to many arguments");
