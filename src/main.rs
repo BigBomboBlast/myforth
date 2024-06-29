@@ -2,10 +2,17 @@ use std::io::{self, Write};
 use std::env;
 use std::alloc::{alloc, dealloc, Layout};
 use std::ptr;
+use std::fs::File;
+use std::io::Read;
+
+mod operations;
+pub use operations::*;
 
 #[derive(Debug)]
 enum Op {
-    Push(i32),
+    PushB(u8),
+    PushI(i32),
+    PushF(f32),
     Add,
     Sub,
     Eq, // pop stack twice - push 1 or 0
@@ -60,11 +67,17 @@ fn parse_to_words(source: &String) -> Vec<(&str, usize, usize)> {
     }
 
     return result;
-} // overall I feel like this function heavily abuses rust pattern matching.
+}
 
 fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
     let is_int = |w: &str| w.parse::<i32>().is_ok();
     let to_int = |w: &str| w.parse::<i32>().unwrap();
+
+    let is_float = |w: &str| w.parse::<f32>().is_ok();
+    let to_float = |w: &str| w.parse::<f32>().unwrap();
+
+    let is_byte = |w: &str| w.parse::<u8>().is_ok();
+    let to_byte = |w: &str| w.parse::<u8>().unwrap();
 
     let mut jump_locations: Vec<usize> = vec![];
     let mut tokens: Vec<Op> = vec![];
@@ -138,7 +151,9 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
                 tokens.push(Op::Do(0));
                 jump_locations.push(i);
             }
-            w if is_int(w) => tokens.push(Op::Push(to_int(w))),
+            w if is_byte(w) => tokens.push(Op::PushB(to_byte(w))),
+            w if is_int(w) => tokens.push(Op::PushI(to_int(w))),
+            w if is_float(w) => tokens.push(Op::PushF(to_float(w))),
             _ => panic!("{}:{} Unknown Word `{}` Encountered", line, col, word),
         }
     }
@@ -156,44 +171,35 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
     return tokens;
 }
 
-fn run(program: &Vec<Op>, stack: &mut Vec<i32>) {
+fn run(program: &Vec<Op>, mut s: &mut Vec<V>) -> Vec<V> {
     // `ip` stands for `instruction pointer`
     let mut ip = 0;
     while ip < program.len() {
         match program[ip] {
-            Op::Push(n) => stack.push(n),
+            Op::PushI(n) => s.push(V::I(n)),
+            Op::PushF(f) => s.push(V::F(f)),
+            Op::PushB(b) => s.push(V::B(b)),
             Op::Add => {
-                let x = stack.pop().expect("stack underflow"); 
-                let y = stack.pop().expect("stack underflow"); 
-                stack.push(x + y); // this will cause rust panic for stack underflow
+                OP_ADD(s);
             }
             Op::Sub => {
-                let x = stack.pop().expect("stack underflow"); 
-                let y = stack.pop().expect("stack underflow"); 
-                stack.push(y - x); // may cause rust panic
+                OP_SUB(s);
             }
             Op::Eq => {
-                let x = stack.pop().expect("stack underflow"); 
-                let y = stack.pop().expect("stack underflow"); 
-                stack.push((x == y) as i32); // may cause rust panic
+                OP_EQ(s);
             }
             Op::Gt => {
-                let x = stack.pop().expect("stack underflow"); 
-                let y = stack.pop().expect("stack underflow"); 
-                stack.push((y > x) as i32); // may cause rust panic
+                OP_GT(s);
             }
             Op::Out => {
-                let x = stack.pop().expect("stack underflow"); 
-                println!("{}", x); // may cause rust panic
+                OP_OUT(s);
             }
             Op:: Dup => {
-                let x = stack.pop().expect("stack underflow");
-                stack.push(x);
-                stack.push(x);
+                OP_DUP(s);
             }
             Op::If(label) => {
-                let x = stack.pop().expect("stack underflow");
-                if x == 0 { // condition is false
+                let x = s.pop().expect("stack underflow");
+                if x == V::B(0) { // condition is false
                     // jump to label
                     ip = label;
                 }
@@ -202,33 +208,23 @@ fn run(program: &Vec<Op>, stack: &mut Vec<i32>) {
             Op::End(label) => ip = label,
             Op::While => (), // doesnt do anything, just a label to jump to
             Op::Do(label) => {
-                let x = stack.pop().expect("stack underflow");
-                if x == 0 { // loop condition is false
+                let x = s.pop().expect("stack underflow");
+                if x == V::B(0) { // loop condition is false
                     ip = label // jump to end
                 }
             }
         }
         ip+=1;
     }
+    return s.to_vec();
 }
 
 fn main() {
     // get args
     let args: Vec<String> = env::args().collect();
     if args.len() == 1 {
-        panic!("\nmust supply argument\nload to load program\nrepl to run repl\n"); 
-    }
-
-    // will be able to read from files soon
-    if args[1] == "load" {
-        let mut stack: Vec<i32> = vec![];
-        let hardcoded = String::from("\n\n\n 8   8 8 = if\n  out  end  \n");
-        println!("What you typed {:?}", parse_to_words(&hardcoded));
-        //let tokens: Vec<Op> = tokenize(&parse_to_words(&hardcoded));
-        //run(&tokens, &mut stack);
-    } else if args[1] == "repl" {
-        let mut input = String::new(); // to store input
-        let mut stack: Vec<i32> = vec![];
+        let mut input = String::new();
+        let mut stack: Vec<V> = vec![];
 
         loop {
             print!("\n>> "); // prompt
@@ -237,12 +233,20 @@ fn main() {
                        .expect("failed"); // read input to buffer
             
             let tokens: Vec<Op> = tokenize(&parse_to_words(&input));
-            println!("tokens - {:?}", tokens);
             run(&tokens, &mut stack);
-            println!("STACK TRACE - {:?}", stack);
+            show_stack_debug(&stack);
             input.clear();
         }
+    } else if args.len() == 2 {
+        let mut source = String::new();
+        let mut file = File::open(args[1].clone()).expect("Cannot find the file");
+        file.read_to_string(&mut source).expect("Failed to read file.");
+
+        let mut stack: Vec<V> = vec![];
+        let tokens: Vec<Op> = tokenize(&parse_to_words(&source));
+        run(&tokens, &mut stack);
+        show_stack(&stack);
     } else {
-        println!("Unimplemented?");
+        println!("calm down there buddy, to many arguments");
     }
 }
