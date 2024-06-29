@@ -12,7 +12,6 @@ You can do conditional branching with if-else statements, and while loops work a
 
 This is extreme work in progress and these are my plans:
 
-- clean up the code at is it a little buggy and doesn't make too much sense
 - Implement some kind of procedures/functions
 - Make string literals work
 - Add comments

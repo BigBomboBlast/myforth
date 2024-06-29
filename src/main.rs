@@ -10,9 +10,9 @@ pub use operations::*;
 
 #[derive(Debug)]
 enum Op {
-    PushU(usize),
-    PushI(i32),
-    PushF(f32),
+    PushPos(usize),
+    PushNeg(i32),
+    PushFloat(f32),
     Add,
     Sub,
     Eq, // pop stack twice - push 1 or 0
@@ -163,9 +163,9 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
                 tokens.push(Op::Do(0));
                 jump_locations.push(i);
             }
-            w if is_usize(w) => tokens.push(Op::PushU(to_usize(w))),
-            w if is_int(w) => tokens.push(Op::PushI(to_int(w))),
-            w if is_float(w) => tokens.push(Op::PushF(to_float(w))),
+            w if is_usize(w) => tokens.push(Op::PushPos(to_usize(w))),
+            w if is_int(w) => tokens.push(Op::PushNeg(to_int(w))),
+            w if is_float(w) => tokens.push(Op::PushFloat(to_float(w))),
             _ => panic!("{}:{} Unknown Word `{}` Encountered", line, col, word),
         }
     }
@@ -183,14 +183,14 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
     return tokens;
 }
 
-fn run(program: &Vec<Op>, s: &mut Vec<V>, mem: *mut u8) -> Vec<V> {
+fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) -> Vec<Type> {
     // `ip` stands for `instruction pointer`
     let mut ip = 0;
     while ip < program.len() {
         match program[ip] {
-            Op::PushI(n) => s.push(V::I(n)),
-            Op::PushF(f) => s.push(V::F(f)),
-            Op::PushU(u) => s.push(V::U(u)),
+            Op::PushNeg(n) => s.push(Type::Neg(n)),
+            Op::PushFloat(f) => s.push(Type::Float(f)),
+            Op::PushPos(u) => s.push(Type::Pos(u)),
             Op::Add => {
                 OP_ADD(s);
             }
@@ -219,26 +219,26 @@ fn run(program: &Vec<Op>, s: &mut Vec<V>, mem: *mut u8) -> Vec<V> {
                 OP_DUP(s);
             }
             Op::Mem => {
-                s.push(V::U(mem as usize));
+                s.push(Type::Pos(mem as usize));
             }
             Op::Read => unsafe {
-                let V::U(addr) = s.pop().expect("stack underflow") else {
+                let Type::Pos(addr) = s.pop().expect("stack underflow") else {
                     panic!("`Read` expected a possible memory location, got a float/negative value")
                 };
-                s.push(V::U(*(addr as *mut u8) as usize));
+                s.push(Type::Pos(*(addr as *mut u8) as usize));
             } 
             Op::Write => unsafe {
-                let V::U(addr) = s.pop().expect("stack underflow") else {
+                let Type::Pos(addr) = s.pop().expect("stack underflow") else {
                     panic!("`write` expected a possible memory location, got a float/negative value")
                 };
-                let V::U(val) = s.pop().expect("stack underflow") else {
+                let Type::Pos(val) = s.pop().expect("stack underflow") else {
                     panic!("cannot write negative/float to memory - yet")
                 };
                 *(addr as *mut u8) = val as u8;
             }
             Op::If(label) => {
                 let x = s.pop().expect("stack underflow");
-                if x == V::U(0) { // condition is false
+                if x == Type::Pos(0) { // condition is false
                     // jump to label
                     ip = label;
                 }
@@ -248,7 +248,7 @@ fn run(program: &Vec<Op>, s: &mut Vec<V>, mem: *mut u8) -> Vec<V> {
             Op::While => (), // doesnt do anything, just a label to jump to
             Op::Do(label) => {
                 let x = s.pop().expect("stack underflow");
-                if x == V::U(0) { // loop condition is false
+                if x == Type::Pos(0) { // loop condition is false
                     ip = label // jump to end
                 }
             }
@@ -263,7 +263,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() == 1 {
         let mut input = String::new();
-        let mut stack: Vec<V> = vec![];
+        let mut stack: Vec<Type> = vec![];
 
         let layout = Layout::from_size_align(1000, 1).unwrap(); // should be enough for me
         let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
@@ -284,7 +284,7 @@ fn main() {
         let mut file = File::open(args[1].clone()).expect("Cannot find the file");
         file.read_to_string(&mut source).expect("Failed to read file.");
 
-        let mut stack: Vec<V> = vec![];
+        let mut stack: Vec<Type> = vec![];
         let layout = Layout::from_size_align(1000, 1).unwrap(); // is enough for me
         let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
         
