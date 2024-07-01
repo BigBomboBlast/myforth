@@ -5,6 +5,7 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::ptr;
 use std::fs::File;
 use std::io::Read;
+use std::collections::HashMap;
 
 mod operations;
 pub use operations::*;
@@ -33,6 +34,9 @@ enum Op<'a> {
     End(usize), // unconditional jump instruction
     While, // just a label
     Do(usize), // pop stack - if 0 jump to end, otherwise proceed, same as `if` but has different rules
+    Defword(usize), // unconditional jump
+    Return, // jump based on return stack
+    Call(usize), // jump to function definiton
     EndOfProgram,
 }
 
@@ -61,7 +65,6 @@ fn find_end_str(source: &String, mut idx: usize) -> usize {
 
 
 fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
-
     // helper function to identify token types
     let is_num = |w: &str| {
         match w {
@@ -120,11 +123,13 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
     return result;
 }
 
-fn parse_to_program<'a>(source: &'a Vec<(&'a str, usize, usize, Token)>) -> Vec<Op<'a>> {
+fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> Vec<Op<'a>> {
     let mut jump_locations: Vec<usize> = vec![];
     let mut program: Vec<Op> = vec![];
-    for i in 0..source.len() {
-        let (literal, line, col, token) = source[i];
+    let mut i = 0;
+    let mut dict: HashMap<&str, usize> = HashMap::new();
+    while !source.is_empty() {
+        let (literal, line, col, token) = source.remove(0);
         if token == Token::Word {
             match literal {
                 "+" => program.push(Op::Add),
@@ -196,7 +201,29 @@ fn parse_to_program<'a>(source: &'a Vec<(&'a str, usize, usize, Token)>) -> Vec<
                     program.push(Op::Do(0));
                     jump_locations.push(i);
                 }
-                _ => panic!("{}:{} Unknown Word `{}` Encountered", line, col, literal),
+                "defword" => {
+                    program.push(Op::Defword(0));
+                    jump_locations.push(i);
+
+                    let (word_name, _, _, _) = source.remove(0);
+                    dict.insert(word_name, i+1);
+                }
+                "return" => {
+                    program.push(Op::Return);
+                    let errmsg = format!("{}:{} dangling `end`", line, col);
+                    let mut location = jump_locations.pop().expect(&errmsg);
+                    match program[location] {
+                        Op::Defword(ref mut n) => *n = i+1,
+                        _ => panic!("{}:{} `return` expected to be used in word declaration", line, col),
+                    }
+                }
+                word => {
+                    if let Some(loc) = dict.get(word) {
+                        program.push(Op::Call(*loc))
+                    } else {
+                        panic!("{}:{} Unknown Word `{}` Encountered", line, col, literal)
+                    }
+                }
             }
         } else if token == Token::Num {
             // helper functions to parse integers that are strings
@@ -215,6 +242,7 @@ fn parse_to_program<'a>(source: &'a Vec<(&'a str, usize, usize, Token)>) -> Vec<
         } else if token == Token::Str {
             program.push(Op::PushStr(literal));
         }
+        i+=1;
     }
 
     if !jump_locations.is_empty() {
@@ -231,9 +259,9 @@ fn parse_to_program<'a>(source: &'a Vec<(&'a str, usize, usize, Token)>) -> Vec<
     return program;
 }
 
-
 fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
     // `ip` stands for `instruction pointer`
+    let mut return_stack: Vec<usize> = vec![];
     let mut ip = 0;
     while ip < program.len() {
         match program[ip] {
@@ -338,6 +366,12 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                     ip+=1;
                 }
             }
+            Op::Defword(label) => ip = label,
+            Op::Return => ip = return_stack.pop().expect("major problem, developer, in return instruction in parse_to_program"),
+            Op::Call(label) => {
+                return_stack.push(ip+1);
+                ip = label;
+            }
             Op::EndOfProgram => ip = program.len(),
         }
     }
@@ -353,17 +387,17 @@ fn main() {
         let layout = Layout::from_size_align(1000, 1).unwrap(); // should be enough for me
         let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
 
-        println!("Welcome to Bombo's Forth Interactive Environment Repl");
+        println!("\nWelcome to Bombo's Forth Interactive Environment Repl");
         println!("Note that accessing memory can be quite janky in the REPL");
-        println!("Just have fun with it, the REPL is only for getting a feel for things\n");
+        println!("Just have fun with it, the REPL is only for getting a feel for things");
         loop {
             print!("\n>> "); // prompt
             io::stdout().flush().unwrap();
             io::stdin().read_line(&mut input)
                        .expect("failed"); // read input to buffer
             
-            let tokens = tokenize(&input);
-            let program = parse_to_program(&tokens);
+            let mut tokens = tokenize(&input);
+            let program = parse_to_program(&mut tokens);
             run(&program, &mut stack, mem);
             println!("{:?}", program);
             show_stack_debug(&stack);
@@ -378,9 +412,9 @@ fn main() {
         let layout = Layout::from_size_align(1000, 1).unwrap(); // is enough for me
         let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
        
-        let tokens = tokenize(&source);
-        let program: Vec<Op> = parse_to_program(&tokens);
-        //println!("{:?}", program);
+        let mut tokens = tokenize(&source);
+        let program: Vec<Op> = parse_to_program(&mut tokens);
+        println!("{:?}", program);
         run(&program, &mut stack, mem);
         show_stack(&stack);
     } else {

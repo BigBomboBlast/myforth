@@ -4,20 +4,15 @@ I wanted to create my own custom programming language from scratch. I think some
 
 ## STATE OF PROJECT RN
 
-There is a basic REPL that will read commands and print the stack as well as how the program is being tokenized.
-
-You can do conditional branching with if-else statements, and while loops work as well. You can now have floats, integers, and characters onto the stack. You are also given 1kb of memory to read and write to, and can do pointer arithmetic and stuff. 
+at this point, the project is almost complete. I knew once you where able to define your own procedures that My Forth implementation would be complete, since then language would become useable. Now I just gotta clean up the error messaging, add comments, run some tests, then use the langauge myself to write some basic programs/algorithms. 
 
 ## TODO
 
-This is extreme work in progress and these are my plans:
-
-- Implement some kind of procedures/functions
-- Make string literals work
-- Add comments
-- Add more instructions
-- Implement proper error messaging, polish
-- implement some example code like rule110 and maybe some basic algorithms
+- clean up error messaging
+- add comments
+- run some tests
+- write a fizzbuzz program and some other crap so that I can prove to myself that my language is useable.
+- add some actual documentation
 
 ## Thats literally it
 
