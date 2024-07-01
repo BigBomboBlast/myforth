@@ -24,6 +24,7 @@ enum Op<'a> {
     Lteq, // <=
     Dup, // Duplicate value on the top of the stack
     Out, // pop stack - print to console
+    Println, // i dont know what this does, prints a string i geuss?
     Mem, // push address of the beggining of memory
     Read, // pop stack, expecting a memory address, push value contained at that memory address
     Write, // pop stack twice, expecting a memory address and value, store value at memory address
@@ -138,6 +139,7 @@ fn parse_to_program<'a>(source: &'a Vec<(&'a str, usize, usize, Token)>) -> Vec<
                 "mem" => program.push(Op::Mem),
                 "read" => program.push(Op::Read),
                 "write" => program.push(Op::Write),
+                "println" => program.push(Op::Println),
                 "if" => {
                     program.push(Op::If(0));
                     jump_locations.push(i);
@@ -247,8 +249,12 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                 s.push(Type::Pos(u));
                 ip+=1;
             }
-            Op::PushStr(s) => {
-                println!("not implemented");
+            Op::PushStr(string) => unsafe {
+                // allocate memory  
+                let str_: &str = string;
+                let ptr: *const u8 = str_.as_ptr();
+                s.push(Type::Pos(ptr as usize));
+                s.push(Type::Pos(str_.len() as usize));
                 ip+=1;
             }
             Op::Add => {
@@ -283,8 +289,12 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                 OP_OUT(s);
                 ip+=1;
             }
-            Op:: Dup => {
+            Op::Dup => {
                 OP_DUP(s);
+                ip+=1;
+            }
+            Op::Println => unsafe {
+                OP_PRINTLN(s);
                 ip+=1;
             }
             Op::Mem => {
@@ -299,11 +309,11 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                 ip+=1;
             } 
             Op::Write => unsafe {
-                let Type::Pos(addr) = s.pop().expect("stack underflow") else {
-                    panic!("`write` expected a possible memory location, got a float/negative value")
-                };
                 let Type::Pos(val) = s.pop().expect("stack underflow") else {
                     panic!("cannot write negative/float to memory - yet")
+                };
+                let Type::Pos(addr) = s.pop().expect("stack underflow") else {
+                    panic!("`write` expected a possible memory location, got a float/negative value")
                 };
                 *(addr as *mut u8) = val as u8;
                 ip+=1;
@@ -343,6 +353,9 @@ fn main() {
         let layout = Layout::from_size_align(1000, 1).unwrap(); // should be enough for me
         let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
 
+        println!("Welcome to Bombo's Forth Interactive Environment Repl");
+        println!("Note that accessing memory can be quite janky in the REPL");
+        println!("Just have fun with it, the REPL is only for getting a feel for things\n");
         loop {
             print!("\n>> "); // prompt
             io::stdout().flush().unwrap();
