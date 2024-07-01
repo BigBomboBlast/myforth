@@ -16,6 +16,7 @@ This is extreme work in progress and these are my plans:
 - Make string literals work
 - Add comments
 - Add more instructions
+- implement some example code like rule110 and maybe some basic algorithms
 
 ## Thats literally it
 

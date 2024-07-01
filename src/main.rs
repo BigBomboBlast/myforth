@@ -1,3 +1,4 @@
+#![allow(warnings)]
 use std::io::{self, Write};
 use std::env;
 use std::alloc::{alloc, dealloc, Layout};
@@ -9,10 +10,11 @@ mod operations;
 pub use operations::*;
 
 #[derive(Debug)]
-enum Op {
+enum Op<'a> {
     PushPos(usize),
     PushNeg(i32),
     PushFloat(f32),
+    PushStr(&'a str),
     Add,
     Sub,
     Eq, // pop stack twice - push 1 or 0
@@ -30,148 +32,191 @@ enum Op {
     End(usize), // unconditional jump instruction
     While, // just a label
     Do(usize), // pop stack - if 0 jump to end, otherwise proceed, same as `if` but has different rules
+    EndOfProgram,
 }
 
-// This is one of the functions
-fn parse_to_words(source: &String) -> Vec<(&str, usize, usize)> {
-    // Need to split string by spaces so `8 8 +` becomes `["8", "8", "+"]
-    // BUT I need to keep track of the line and column each word is located
-    // Which is why this returns an array of tuples, (word, line_no, column_no)
-    let mut result: Vec<(&str, usize, usize)> = vec![];
-    let mut word_start = None;
-    let mut line_no: usize = 1; // keep track of current line and column
-    let mut column_no: usize = 1; 
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum Token {
+    Num,
+    Str,
+    Word,
+}
 
-    for (i, char) in source.char_indices() {
-        // I cannot use `i` because it's an INDEX OF ENTIRE STRING not the column number
-        // the column starts at at 1 and resets to 1 with every new line
-        match (char.is_whitespace(), word_start) {
-            // word_start keeps track of the beggining index of each word, including column_no
-            (false, None) => word_start = Some((i, column_no)), 
-            (true, Some((start, col))) => {
-                result.push((&source[start..i], line_no, col));
+fn find_end_str(source: &String, mut idx: usize) -> usize {
+    loop {
+        let char = source.chars().nth(idx).expect("Unclosed String");
+        let peek = source.chars().nth(idx+1).expect("Problem with find_end_str()");
+
+        if char == '"' {
+            if !peek.is_whitespace() {
+                panic!("Found unexpected character `{}` after string literal", peek);
+            }
+            break;
+        }
+        idx+=1;
+    }
+    return idx;
+}
+
+
+fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
+
+    // helper function to identify token types
+    let is_num = |w: &str| {
+        match w {
+           w if w.parse::<i32>().is_ok() => true,
+           w if w.parse::<f32>().is_ok() => true,
+           _ => false,
+        }
+    };
+
+    let mut result: Vec<(&str, usize, usize, Token)> = vec![];
+    let mut word_start = None;
+    let mut line_no: usize = 1;
+    let mut column_no: usize = 1;
+   
+    let mut i = 0;
+
+    while i < source.len() {
+        let char = source.chars().nth(i).unwrap();
+
+        match (char.is_whitespace(), word_start, char == '"') {
+            (false, None, false) => {
+                word_start = Some((i, column_no));
+            }
+            (false, None, true) => {
+                let end = find_end_str(source, i+1);
+                result.push((&source[(i+1)..end], line_no, column_no, Token::Str));
+                i = end;
+                column_no = i+1;
+                // column numbering starts at 1, `i` and `end` are full string indexes
                 word_start = None;
-                // in case next is a newline, I have to update
+            }
+            (true, Some((start, col)), false) => {
+                let token_literal = &source[start..i];
+                if is_num(token_literal) {
+                    result.push((token_literal, line_no, col, Token::Num));
+                } else {
+                    result.push((token_literal, line_no, col, Token::Word));
+                }
+
+                word_start = None;
                 if char == '\n' {
-                    column_no = 0; // must be 0 since this gets incremented after match anyways
+                    column_no = 0;                     
                     line_no += 1;
                 }
             }
-            (true, _) if char == '\n' => {
+            (_, Some((_, _)), true) => panic!("found unexpected `\"` in word"),
+            (true, _, _) if char == '\n' => {
                 column_no = 0;
                 line_no += 1;
             }
             _ => (),
         }
+        i+=1;
         column_no += 1;
     }
-   
-    // string doesn't neccesarily have to end with whitespace, so I check if there was a word
-    // and add it to the result accordingly one more time
-    if let Some((start, col)) = word_start {
-        result.push((&source[start..], line_no, col))
-    }
-
     return result;
 }
 
-fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
-    let is_int = |w: &str| w.parse::<i32>().is_ok();
-    let to_int = |w: &str| w.parse::<i32>().unwrap();
-
-    let is_float = |w: &str| w.parse::<f32>().is_ok();
-    let to_float = |w: &str| w.parse::<f32>().unwrap();
-
-    let is_usize = |w: &str| w.parse::<usize>().is_ok();
-    let to_usize = |w: &str| w.parse::<usize>().unwrap();
-
+fn parse_to_program<'a>(source: &'a Vec<(&'a str, usize, usize, Token)>) -> Vec<Op<'a>> {
     let mut jump_locations: Vec<usize> = vec![];
-    let mut tokens: Vec<Op> = vec![];
+    let mut program: Vec<Op> = vec![];
     for i in 0..source.len() {
-        let (word, line, col) = source[i];
-        match word {
-            "+" => tokens.push(Op::Add),
-            "-" => tokens.push(Op::Sub),
-            "=" => tokens.push(Op::Eq),
-            ">" => tokens.push(Op::Gt),
-            "<" => tokens.push(Op::Lt),
-            ">=" => tokens.push(Op::Gteq),
-            "<=" => tokens.push(Op::Lteq),
-            "out" => tokens.push(Op::Out),
-            "dup" => tokens.push(Op::Dup),
-            "mem" => tokens.push(Op::Mem),
-            "read" => tokens.push(Op::Read),
-            "write" => tokens.push(Op::Write),
-            "if" => {
-                tokens.push(Op::If(0));
-                jump_locations.push(i);
-            }
-            "else" => {
-                tokens.push(Op::Else(0));
-                let errmsg = format!("{}:{} dangling `else`", line, col);
-                match tokens[jump_locations.pop().expect(&errmsg)] {
-                    // although `if` is supposed to jump to the instruction AFTER `else`
-                    // the instruction pointer gets incremented after the jump anyways
-                    // effectively skipping the `else`
-                    // I could probably think it out more, but it sounds like a pain and this works
-                    Op::If(ref mut n) => *n = i,
-                    _ => {
-                        let errmsg = format!("{}:{} Expected to close If statement", line, col);
-                        panic!("{}", errmsg);
-                    }
+        let (literal, line, col, token) = source[i];
+        if token == Token::Word {
+            match literal {
+                "+" => program.push(Op::Add),
+                "-" => program.push(Op::Sub),
+                "=" => program.push(Op::Eq),
+                ">" => program.push(Op::Gt),
+                "<" => program.push(Op::Lt),
+                ">=" => program.push(Op::Gteq),
+                "<=" => program.push(Op::Lteq),
+                "out" => program.push(Op::Out),
+                "dup" => program.push(Op::Dup),
+                "mem" => program.push(Op::Mem),
+                "read" => program.push(Op::Read),
+                "write" => program.push(Op::Write),
+                "if" => {
+                    program.push(Op::If(0));
+                    jump_locations.push(i);
                 }
-                jump_locations.push(i);
-            }
-            "end" => {
-                let errmsg = format!("{}:{} dangling `end`", line, col);
-                let mut label = 0;
-                let mut location = jump_locations.pop().expect(&errmsg);
-                match tokens[location] {
-                    Op::If(ref mut n) => {
-                        *n = i;
-                        label = i;
-                    }
-                    Op::Else(ref mut n) => {
-                        *n = i;
-                        label = i;
-                    }
-                    Op::Do(ref mut n) => {
-                        *n = i;
-                        println!("{:?}", tokens);
-                        let errmsg = format!("{}:{} `end` expected `while` before `do`", line, col);
-                        let while_loc = jump_locations.pop().expect(&errmsg);
-                        match tokens[while_loc] { // this match is for the sole purpose of destructuring
-                            Op::While => label = while_loc,
-                            _ => {
-                                panic!("{}", errmsg);
-                            }
+                "else" => {
+                    program.push(Op::Else(0));
+                    let errmsg = format!("{}:{} dangling `else`", line, col);
+                    match program[jump_locations.pop().expect(&errmsg)] {
+                        Op::If(ref mut n) => *n = i+1,
+                        _ => {
+                            let errmsg = format!("{}:{} Expected to close If statement", line, col);
+                            panic!("{}", errmsg);
                         }
                     }
-                    Op::While => {
-                        let errmsg = format!("{}:{} `end` expected `do` after `while`", line, col);
-                        panic!("{}", errmsg);
-                    },
-                    _ => (),
+                    jump_locations.push(i);
                 }
-                tokens.push(Op::End(label)); // jumps to itself in the case of if statements
+                "end" => {
+                    let errmsg = format!("{}:{} dangling `end`", line, col);
+                    let mut label = 0;
+                    let mut location = jump_locations.pop().expect(&errmsg);
+                    match program[location] {
+                        Op::If(ref mut n) => {
+                            *n = i;
+                            label = i+1;
+                        }
+                        Op::Else(ref mut n) => {
+                            *n = i;
+                            label = i+1;
+                        }
+                        Op::Do(ref mut n) => {
+                            *n = i+1;
+                            let errmsg = format!("{}:{} `end` expected `while` before `do`", line, col);
+                            let while_loc = jump_locations.pop().expect(&errmsg);
+                            match program[while_loc] { // this match is for the sole purpose of destructuring
+                                Op::While => label = while_loc,
+                                _ => {
+                                    panic!("{}", errmsg);
+                                }
+                            }
+                        }
+                        Op::While => {
+                            let errmsg = format!("{}:{} `end` expected `do` after `while`", line, col);
+                            panic!("{}", errmsg);
+                        },
+                        _ => (),
+                    }
+                    program.push(Op::End(label)); // jumps to itself in the case of if statements
+                }
+                "while" => {
+                    program.push(Op::While);
+                    jump_locations.push(i);
+                }
+                "do" => {
+                    program.push(Op::Do(0));
+                    jump_locations.push(i);
+                }
+                _ => panic!("{}:{} Unknown Word `{}` Encountered", line, col, literal),
             }
-            "while" => {
-                tokens.push(Op::While);
-                jump_locations.push(i);
+        } else if token == Token::Num {
+            // helper functions to parse integers that are strings
+            let is_positive = |n: &str| n.parse::<usize>().is_ok();
+            let to_positive = |n: &str| n.parse::<usize>().unwrap();
+            let is_negative = |n: &str| n.parse::<i32>().is_ok();
+            let to_negative = |n: &str| n.parse::<i32>().unwrap();
+            let is_float = |n: &str| n.parse::<f32>().is_ok();
+            let to_float = |n: &str| n.parse::<f32>().unwrap();
+            match literal {
+                n if is_positive(n) => program.push(Op::PushPos(to_positive(n))),
+                n if is_negative(n) => program.push(Op::PushNeg(to_negative(n))),
+                n if is_float(n) => program.push(Op::PushFloat(to_float(n))),
+                _ => panic!("something went wrong in parse_to_program() when matching the numbers"),
             }
-            "do" => {
-                tokens.push(Op::Do(0));
-                jump_locations.push(i);
-            }
-            w if is_usize(w) => tokens.push(Op::PushPos(to_usize(w))),
-            w if is_int(w) => tokens.push(Op::PushNeg(to_int(w))),
-            w if is_float(w) => tokens.push(Op::PushFloat(to_float(w))),
-            _ => panic!("{}:{} Unknown Word `{}` Encountered", line, col, word),
+        } else if token == Token::Str {
+            program.push(Op::PushStr(literal));
         }
     }
 
     if !jump_locations.is_empty() {
-        let (word, line, col) = source[jump_locations.pop().unwrap()];
+        let (word, line, col, _) = source[jump_locations.pop().unwrap()];
         match word {
             "if" => panic!("{}:{} Unclosed `if`", line, col),
             "else" => panic!("{}:{} unclosed `else`", line, col),
@@ -180,52 +225,78 @@ fn tokenize(source: &Vec<(&str, usize, usize)>) -> Vec<Op> {
             _ => (),
         }
     }
-    return tokens;
+    program.push(Op::EndOfProgram);
+    return program;
 }
 
-fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) -> Vec<Type> {
+
+fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
     // `ip` stands for `instruction pointer`
     let mut ip = 0;
     while ip < program.len() {
         match program[ip] {
-            Op::PushNeg(n) => s.push(Type::Neg(n)),
-            Op::PushFloat(f) => s.push(Type::Float(f)),
-            Op::PushPos(u) => s.push(Type::Pos(u)),
+            Op::PushNeg(n) => {
+                s.push(Type::Neg(n));
+                ip+=1;
+            }
+            Op::PushFloat(f) => {
+                s.push(Type::Float(f));
+                ip+=1;
+            }
+            Op::PushPos(u) => {
+                s.push(Type::Pos(u));
+                ip+=1;
+            }
+            Op::PushStr(s) => {
+                println!("not implemented");
+                ip+=1;
+            }
             Op::Add => {
                 OP_ADD(s);
+                ip+=1;
             }
             Op::Sub => {
                 OP_SUB(s);
+                ip+=1;
             }
             Op::Eq => {
                 OP_EQ(s);
+                ip+=1;
             }
             Op::Gt => {
                 OP_GT(s);
+                ip+=1;
             }
             Op::Lt => {
                 OP_LT(s);
+                ip+=1;
             }
             Op::Gteq => {
                 OP_GTEQ(s);
+                ip+=1;
             }
             Op::Lteq => {
                 OP_LTEQ(s);
+                ip+=1;
             }
             Op::Out => {
                 OP_OUT(s);
+                ip+=1;
             }
             Op:: Dup => {
                 OP_DUP(s);
+                ip+=1;
             }
             Op::Mem => {
                 s.push(Type::Pos(mem as usize));
+                ip+=1;
             }
             Op::Read => unsafe {
                 let Type::Pos(addr) = s.pop().expect("stack underflow") else {
                     panic!("`Read` expected a possible memory location, got a float/negative value")
                 };
                 s.push(Type::Pos(*(addr as *mut u8) as usize));
+                ip+=1;
             } 
             Op::Write => unsafe {
                 let Type::Pos(addr) = s.pop().expect("stack underflow") else {
@@ -235,27 +306,31 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) -> Vec<Type> {
                     panic!("cannot write negative/float to memory - yet")
                 };
                 *(addr as *mut u8) = val as u8;
+                ip+=1;
             }
             Op::If(label) => {
                 let x = s.pop().expect("stack underflow");
                 if x == Type::Pos(0) { // condition is false
                     // jump to label
                     ip = label;
+                } else {
+                    ip+=1;
                 }
             }
             Op::Else(label) => ip = label,
             Op::End(label) => ip = label,
-            Op::While => (), // doesnt do anything, just a label to jump to
+            Op::While => ip+=1, // doesnt do anything, just a label to jump to
             Op::Do(label) => {
                 let x = s.pop().expect("stack underflow");
                 if x == Type::Pos(0) { // loop condition is false
                     ip = label // jump to end
+                } else {
+                    ip+=1;
                 }
             }
+            Op::EndOfProgram => ip = program.len(),
         }
-        ip+=1;
     }
-    return s.to_vec();
 }
 
 fn main() {
@@ -274,8 +349,10 @@ fn main() {
             io::stdin().read_line(&mut input)
                        .expect("failed"); // read input to buffer
             
-            let tokens: Vec<Op> = tokenize(&parse_to_words(&input));
-            run(&tokens, &mut stack, mem);
+            let tokens = tokenize(&input);
+            let program = parse_to_program(&tokens);
+            run(&program, &mut stack, mem);
+            println!("{:?}", program);
             show_stack_debug(&stack);
             input.clear();
         }
@@ -287,9 +364,11 @@ fn main() {
         let mut stack: Vec<Type> = vec![];
         let layout = Layout::from_size_align(1000, 1).unwrap(); // is enough for me
         let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
-        
-        let tokens: Vec<Op> = tokenize(&parse_to_words(&source));
-        run(&tokens, &mut stack, mem);
+       
+        let tokens = tokenize(&source);
+        let program: Vec<Op> = parse_to_program(&tokens);
+        //println!("{:?}", program);
+        run(&program, &mut stack, mem);
         show_stack(&stack);
     } else {
         println!("calm down there buddy, to many arguments");
