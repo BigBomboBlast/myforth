@@ -8,9 +8,7 @@ at this point, the project is almost complete. I knew once you where able to def
 
 ## TODO
 
-- clean up error messaging
-- add comments
-- run some tests
+- add more instructions
 - write a fizzbuzz program and some other crap so that I can prove to myself that my language is useable.
 - add some actual documentation
 

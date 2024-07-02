@@ -47,6 +47,23 @@ enum Token {
     Word,
 }
 
+fn remove_comments(source: &String) -> String {
+    let mut result = String::new();
+
+    for line in source.lines() {
+        // remove comment portion 
+        if let Some((code, _)) = line.split_once("//") {
+            result.push_str(code);
+            result.push('\n');
+        } else { // this runs when there is no comment
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    return result;
+}
+
 fn find_end_str(source: &String, mut idx: usize) -> usize {
     loop {
         let char = source.chars().nth(idx).expect("Unclosed String");
@@ -124,6 +141,7 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
 }
 
 fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> Vec<Op<'a>> {
+    let error_reference = source.clone(); // I need this for error referencing, since I consume tokens using .remove(0)
     let mut jump_locations: Vec<usize> = vec![];
     let mut program: Vec<Op> = vec![];
     let mut i = 0;
@@ -189,6 +207,10 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                             let errmsg = format!("{}:{} `end` expected `do` after `while`", line, col);
                             panic!("{}", errmsg);
                         },
+                        Op::Defword(_) => {
+                            let errmsg = format!("{}:{} use `return` to end word declarations", line, col);
+                            panic!("{}", errmsg);
+                        }
                         _ => (),
                     }
                     program.push(Op::End(label)); // jumps to itself in the case of if statements
@@ -246,7 +268,7 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
     }
 
     if !jump_locations.is_empty() {
-        let (word, line, col, _) = source[jump_locations.pop().unwrap()];
+        let (word, line, col, _) = error_reference[jump_locations.pop().unwrap()];
         match word {
             "if" => panic!("{}:{} Unclosed `if`", line, col),
             "else" => panic!("{}:{} unclosed `else`", line, col),
@@ -411,10 +433,10 @@ fn main() {
         let mut stack: Vec<Type> = vec![];
         let layout = Layout::from_size_align(1000, 1).unwrap(); // is enough for me
         let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
-       
-        let mut tokens = tokenize(&source);
+      
+        let src = remove_comments(&source);
+        let mut tokens = tokenize(&src);
         let program: Vec<Op> = parse_to_program(&mut tokens);
-        println!("{:?}", program);
         run(&program, &mut stack, mem);
         show_stack(&stack);
     } else {
