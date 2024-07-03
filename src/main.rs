@@ -9,21 +9,35 @@ use std::collections::HashMap;
 
 mod operations;
 pub use operations::*;
+mod types;
+pub use types::*;
 
 #[derive(Debug)]
 enum Op<'a> {
     PushPos(usize),
-    PushNeg(i32),
-    PushFloat(f32),
+    PushNeg(i64),
+    PushFloat(f64),
     PushStr(&'a str),
     Add,
     Sub,
+    Mul,
+    Div,
+    To_signed,
+    To_unsigned,
+    To_float,
     Eq, // pop stack twice - push 1 or 0
     Gt, // greater than
     Lt, // less than
-    Gteq, // >=
+    Gteq, // >= 
     Lteq, // <=
+//    Or, // pop twice, if at least 1 is not 0, push 1 to stack
+//    And, // pop twice, if both are not 0, push 1 to stack
+//    Not, // pop stack, if >0 push 0, else push 1
     Dup, // Duplicate value on the top of the stack
+    Swap, // swap 2 values on top of stack
+    Drop, // remove value on top of stack
+    Over, // copy element on bottom of the stack to the top of the stack 
+    Rotate, // rotate 3 values on top of the stack, a b c - b c a
     Out, // pop stack - print to console
     Println, // i dont know what this does, prints a string i geuss?
     Mem, // push address of the beggining of memory
@@ -85,8 +99,8 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
     // helper function to identify token types
     let is_num = |w: &str| {
         match w {
-           w if w.parse::<i32>().is_ok() => true,
-           w if w.parse::<f32>().is_ok() => true,
+           w if w.parse::<i64>().is_ok() => true,
+           w if w.parse::<f64>().is_ok() => true,
            _ => false,
         }
     };
@@ -152,6 +166,11 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
             match literal {
                 "+" => program.push(Op::Add),
                 "-" => program.push(Op::Sub),
+                "*" => program.push(Op::Mul),
+                "/" => program.push(Op::Div),
+                "to_signed" => program.push(Op::To_signed),
+                "to_unsigned" => program.push(Op::To_unsigned),
+                "to_float" => program.push(Op::To_float),
                 "=" => program.push(Op::Eq),
                 ">" => program.push(Op::Gt),
                 "<" => program.push(Op::Lt),
@@ -159,6 +178,10 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                 "<=" => program.push(Op::Lteq),
                 "out" => program.push(Op::Out),
                 "dup" => program.push(Op::Dup),
+                "swap" => program.push(Op::Swap),
+                "drop" => program.push(Op::Drop),
+                "over" => program.push(Op::Over),
+                "rotate" => program.push(Op::Rotate),
                 "mem" => program.push(Op::Mem),
                 "read" => program.push(Op::Read),
                 "write" => program.push(Op::Write),
@@ -173,7 +196,7 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                     match program[jump_locations.pop().expect(&errmsg)] {
                         Op::If(ref mut n) => *n = i+1,
                         _ => {
-                            let errmsg = format!("{}:{} Expected to close If statement", line, col);
+                            let errmsg = format!("{}:{} `else` Expected to be used in `if` statement", line, col);
                             panic!("{}", errmsg);
                         }
                     }
@@ -251,10 +274,10 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
             // helper functions to parse integers that are strings
             let is_positive = |n: &str| n.parse::<usize>().is_ok();
             let to_positive = |n: &str| n.parse::<usize>().unwrap();
-            let is_negative = |n: &str| n.parse::<i32>().is_ok();
-            let to_negative = |n: &str| n.parse::<i32>().unwrap();
-            let is_float = |n: &str| n.parse::<f32>().is_ok();
-            let to_float = |n: &str| n.parse::<f32>().unwrap();
+            let is_negative = |n: &str| n.parse::<i64>().is_ok();
+            let to_negative = |n: &str| n.parse::<i64>().unwrap();
+            let is_float = |n: &str| n.parse::<f64>().is_ok();
+            let to_float = |n: &str| n.parse::<f64>().unwrap();
             match literal {
                 n if is_positive(n) => program.push(Op::PushPos(to_positive(n))),
                 n if is_negative(n) => program.push(Op::PushNeg(to_negative(n))),
@@ -288,7 +311,7 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
     while ip < program.len() {
         match program[ip] {
             Op::PushNeg(n) => {
-                s.push(Type::Neg(n));
+                s.push(Type::Signed(n));
                 ip+=1;
             }
             Op::PushFloat(f) => {
@@ -296,15 +319,15 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                 ip+=1;
             }
             Op::PushPos(u) => {
-                s.push(Type::Pos(u));
+                s.push(Type::Unsigned(u));
                 ip+=1;
             }
             Op::PushStr(string) => unsafe {
                 // allocate memory  
                 let str_: &str = string;
                 let ptr: *const u8 = str_.as_ptr();
-                s.push(Type::Pos(ptr as usize));
-                s.push(Type::Pos(str_.len() as usize));
+                s.push(Type::Unsigned(ptr as usize));
+                s.push(Type::Unsigned(str_.len() as usize));
                 ip+=1;
             }
             Op::Add => {
@@ -313,6 +336,26 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
             }
             Op::Sub => {
                 OP_SUB(s);
+                ip+=1;
+            }
+            Op::Mul => {
+                OP_MUL(s);
+                ip+=1;
+            }
+            Op::Div => {
+                OP_DIV(s);
+                ip+=1;
+            }
+            Op::To_unsigned => {
+                OP_TOSIGNED(s);
+                ip+=1;
+            }
+            Op::To_signed => {
+                OP_TOUNSIGNED(s);
+                ip+=1;
+            }
+            Op::To_float => {
+                OP_TOFLOAT(s);
                 ip+=1;
             }
             Op::Eq => {
@@ -343,26 +386,42 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                 OP_DUP(s);
                 ip+=1;
             }
+            Op::Swap => {
+                OP_SWAP(s);
+                ip+=1;
+            }
+            Op::Drop => {
+                OP_DROP(s);
+                ip+=1;
+            }
+            Op::Over => {
+                OP_OVER(s);
+                ip+=1;
+            }
+            Op::Rotate => {
+                OP_ROTATE(s);
+                ip+=1;
+            }
             Op::Println => unsafe {
                 OP_PRINTLN(s);
                 ip+=1;
             }
             Op::Mem => {
-                s.push(Type::Pos(mem as usize));
+                s.push(Type::Unsigned(mem as usize));
                 ip+=1;
             }
             Op::Read => unsafe {
-                let Type::Pos(addr) = s.pop().expect("stack underflow") else {
+                let Type::Unsigned(addr) = s.pop().expect("stack underflow") else {
                     panic!("`Read` expected a possible memory location, got a float/negative value")
                 };
-                s.push(Type::Pos(*(addr as *mut u8) as usize));
+                s.push(Type::Unsigned(*(addr as *mut u8) as usize));
                 ip+=1;
             } 
             Op::Write => unsafe {
-                let Type::Pos(val) = s.pop().expect("stack underflow") else {
+                let Type::Unsigned(val) = s.pop().expect("stack underflow") else {
                     panic!("cannot write negative/float to memory - yet")
                 };
-                let Type::Pos(addr) = s.pop().expect("stack underflow") else {
+                let Type::Unsigned(addr) = s.pop().expect("stack underflow") else {
                     panic!("`write` expected a possible memory location, got a float/negative value")
                 };
                 *(addr as *mut u8) = val as u8;
@@ -370,7 +429,7 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
             }
             Op::If(label) => {
                 let x = s.pop().expect("stack underflow");
-                if x == Type::Pos(0) { // condition is false
+                if x == Type::Unsigned(0) { // condition is false
                     // jump to label
                     ip = label;
                 } else {
@@ -382,7 +441,7 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
             Op::While => ip+=1, // doesnt do anything, just a label to jump to
             Op::Do(label) => {
                 let x = s.pop().expect("stack underflow");
-                if x == Type::Pos(0) { // loop condition is false
+                if x == Type::Unsigned(0) { // loop condition is false
                     ip = label // jump to end
                 } else {
                     ip+=1;
@@ -437,6 +496,7 @@ fn main() {
         let src = remove_comments(&source);
         let mut tokens = tokenize(&src);
         let program: Vec<Op> = parse_to_program(&mut tokens);
+        println!("{:?}", program);
         run(&program, &mut stack, mem);
         show_stack(&stack);
     } else {
