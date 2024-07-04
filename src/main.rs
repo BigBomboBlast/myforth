@@ -44,6 +44,7 @@ enum Op<'a> {
     Read, // pop stack, expecting a memory address, push value contained at that memory address
     Write, // pop stack twice, expecting a memory address and value, store value at memory address
     If(usize), // pop stack - if 0 jump to end, otherwise proceed
+    Ifstar(usize), // used in else-if blocks
     Else(usize), // unconditional jump instruction
     End(usize), // unconditional jump instruction
     While, // just a label
@@ -190,13 +191,24 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                     program.push(Op::If(0));
                     jump_locations.push(i);
                 }
+                "if*" => {
+                    program.push(Op::Ifstar(0));
+                    jump_locations.push(i);
+                }
                 "else" => {
                     program.push(Op::Else(0));
                     let errmsg = format!("{}:{} dangling `else`", line, col);
-                    match program[jump_locations.pop().expect(&errmsg)] {
+                    match &mut program[jump_locations.pop().expect(&errmsg)] {
                         Op::If(ref mut n) => *n = i+1,
+                        Op::Ifstar(ref mut n) => {
+                            *n = i+1;
+                            let errmsg = format!("{}:{} `if*` expected to preceed `else`", line, col);
+                            match &mut program[jump_locations.pop().expect(&errmsg)] {
+                                Op::Else(ref mut n) => *n = i,
+                                _ => panic!("{}", errmsg)
+                            }
+                        }
                         _ => {
-                            let errmsg = format!("{}:{} `else` Expected to be used in `if` statement", line, col);
                             panic!("{}", errmsg);
                         }
                     }
@@ -206,10 +218,19 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                     let errmsg = format!("{}:{} dangling `end`", line, col);
                     let mut label = 0;
                     let mut location = jump_locations.pop().expect(&errmsg);
-                    match program[location] {
+                    match &mut program[location] {
                         Op::If(ref mut n) => {
                             *n = i;
                             label = i+1;
+                        }
+                        Op::Ifstar(ref mut n) => {
+                            *n = i;
+                            label = i+1;
+                            let errmsg = format!("{}:{} `if*` expected to preceed `else`", line, col);
+                            match &mut program[jump_locations.pop().expect(&errmsg)] {
+                                Op::Else(ref mut n) => *n = i,
+                                _ => panic!("{}", errmsg)
+                            }
                         }
                         Op::Else(ref mut n) => {
                             *n = i;
@@ -236,7 +257,8 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                         }
                         _ => (),
                     }
-                    program.push(Op::End(label)); // jumps to itself in the case of if statements
+                    // jumps to itself in case of if statements
+                    program.push(Op::End(label)); 
                 }
                 "while" => {
                     program.push(Op::While);
@@ -428,6 +450,15 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                 ip+=1;
             }
             Op::If(label) => {
+                let x = s.pop().expect("stack underflow");
+                if x == Type::Unsigned(0) { // condition is false
+                    // jump to label
+                    ip = label;
+                } else {
+                    ip+=1;
+                }
+            }
+            Op::Ifstar(label) => {
                 let x = s.pop().expect("stack underflow");
                 if x == Type::Unsigned(0) { // condition is false
                     // jump to label
