@@ -4,7 +4,7 @@
 0 if
     1 out
 else 1 if*
-    "it flippin works" println
+    2 out
     0 if 
         1.1 out
     else 0 if*

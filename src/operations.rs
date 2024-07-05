@@ -137,20 +137,3 @@ pub fn OP_ROTATE(stack: &mut Vec<Type>) {
     stack.push(x);
     stack.push(z);
 }
-pub unsafe fn OP_PRINTLN(stack: &mut Vec<Type>) {
-    let Type::Unsigned(size) = pop!(stack) else {
-        panic!(">:(");
-    };
-    let Type::Unsigned(string_ptr) = pop!(stack) else {
-        panic!(">:(");
-    };
-    let string_as_bytes = std::slice::from_raw_parts((string_ptr as *const u8), size);
-    if let Ok(s) = std::str::from_utf8(string_as_bytes) {
-        println!("{}", s);
-    } else {
-        panic!("blame the guy who wrote this interpreter, something went wrong with OP_PRINTLN");
-    }
-    stack.push(Type::Unsigned(string_ptr));
-    stack.push(Type::Unsigned(size))
-
-}

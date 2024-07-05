@@ -39,15 +39,11 @@ enum Op<'a> {
     Over, // copy element on bottom of the stack to the top of the stack 
     Rotate, // rotate 3 values on top of the stack, a b c - b c a
     Out, // pop stack - print to console
-    Println, // i dont know what this does, prints a string i geuss?
-    Mem, // push address of the beggining of memory
-    Read, // pop stack, expecting a memory address, push value contained at that memory address
-    Write, // pop stack twice, expecting a memory address and value, store value at memory address
     If(usize), // pop stack - if 0 jump to end, otherwise proceed
     Ifstar(usize), // used in else-if blocks
     Else(usize), // unconditional jump instruction
     End(usize), // unconditional jump instruction
-    While, // just a label
+    While, // just a labe
     Do(usize), // pop stack - if 0 jump to end, otherwise proceed, same as `if` but has different rules
     Defword(usize), // unconditional jump
     Return, // jump based on return stack
@@ -183,10 +179,6 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                 "drop" => program.push(Op::Drop),
                 "over" => program.push(Op::Over),
                 "rotate" => program.push(Op::Rotate),
-                "mem" => program.push(Op::Mem),
-                "read" => program.push(Op::Read),
-                "write" => program.push(Op::Write),
-                "println" => program.push(Op::Println),
                 "if" => {
                     program.push(Op::If(0));
                     jump_locations.push(i);
@@ -326,7 +318,7 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
     return program;
 }
 
-fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
+fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
     // `ip` stands for `instruction pointer`
     let mut return_stack: Vec<usize> = vec![];
     let mut ip = 0;
@@ -344,13 +336,8 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                 s.push(Type::Unsigned(u));
                 ip+=1;
             }
-            Op::PushStr(string) => unsafe {
-                // allocate memory  
-                let str_: &str = string;
-                let ptr: *const u8 = str_.as_ptr();
-                s.push(Type::Unsigned(ptr as usize));
-                s.push(Type::Unsigned(str_.len() as usize));
-                ip+=1;
+            Op::PushStr(string) => {
+                panic!("Not Implemented")
             }
             Op::Add => {
                 OP_ADD(s);
@@ -424,31 +411,6 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>, mem: *mut u8) {
                 OP_ROTATE(s);
                 ip+=1;
             }
-            Op::Println => unsafe {
-                OP_PRINTLN(s);
-                ip+=1;
-            }
-            Op::Mem => {
-                s.push(Type::Unsigned(mem as usize));
-                ip+=1;
-            }
-            Op::Read => unsafe {
-                let Type::Unsigned(addr) = s.pop().expect("stack underflow") else {
-                    panic!("`Read` expected a possible memory location, got a float/negative value")
-                };
-                s.push(Type::Unsigned(*(addr as *mut u8) as usize));
-                ip+=1;
-            } 
-            Op::Write => unsafe {
-                let Type::Unsigned(val) = s.pop().expect("stack underflow") else {
-                    panic!("cannot write negative/float to memory - yet")
-                };
-                let Type::Unsigned(addr) = s.pop().expect("stack underflow") else {
-                    panic!("`write` expected a possible memory location, got a float/negative value")
-                };
-                *(addr as *mut u8) = val as u8;
-                ip+=1;
-            }
             Op::If(label) => {
                 let x = s.pop().expect("stack underflow");
                 if x == Type::Unsigned(0) { // condition is false
@@ -496,9 +458,6 @@ fn main() {
         let mut input = String::new();
         let mut stack: Vec<Type> = vec![];
 
-        let layout = Layout::from_size_align(1000, 1).unwrap(); // should be enough for me
-        let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
-
         println!("\nWelcome to Bombo's Forth Interactive Environment Repl");
         println!("Note that accessing memory can be quite janky in the REPL");
         println!("Just have fun with it, the REPL is only for getting a feel for things");
@@ -510,7 +469,7 @@ fn main() {
             
             let mut tokens = tokenize(&input);
             let program = parse_to_program(&mut tokens);
-            run(&program, &mut stack, mem);
+            run(&program, &mut stack);
             println!("{:?}", program);
             show_stack_debug(&stack);
             input.clear();
@@ -521,14 +480,12 @@ fn main() {
         file.read_to_string(&mut source).expect("Failed to read file.");
 
         let mut stack: Vec<Type> = vec![];
-        let layout = Layout::from_size_align(1000, 1).unwrap(); // is enough for me
-        let mem = unsafe { alloc(layout) }; // pointer to beggining of memory
-      
+
         let src = remove_comments(&source);
         let mut tokens = tokenize(&src);
         let program: Vec<Op> = parse_to_program(&mut tokens);
         println!("{:?}", program);
-        run(&program, &mut stack, mem);
+        run(&program, &mut stack);
         show_stack(&stack);
     } else {
         println!("calm down there buddy, to many arguments");
