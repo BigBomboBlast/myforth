@@ -12,7 +12,7 @@ else 1 if*
     else 1 if*
         1.3 out
     end
-else 0 if*
+else 1 if*
     3 out
 else 
     4 out

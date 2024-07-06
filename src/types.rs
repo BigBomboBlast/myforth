@@ -2,222 +2,134 @@ use std::fmt;
 use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::Ordering;
 
-// this file defines the operations and the type system 
-// The stack can hold these number types
-// Floats, Integers, and usize (so memory addresses work easy)
-
-// any positive number is automatically a usize
-// operations that result in floats or negative numbers are handled accordingingly
-
-
 #[derive(Copy, Clone, Debug)]
-pub enum Type { // we have three types, Unsigned, Signed, and Floats
-    Signed(i64),
+pub enum Num {
+    Integer(i64),
     Float(f64),
-    Unsigned(usize), // i geuss `0` is included as a positive number in this language
-    // since by "positive" I really mean "unsigned number"
+}
+
+#[derive(Clone, Debug)]
+pub enum Type {
+    Null,
+    Boolean(bool),
+    Number(Num),
+    Str(String),
+}
+
+pub fn is_falsy(t: Type) -> bool {
+    match t {
+        Type::Number(n) => {
+            match n {
+                n if n == Num::Integer(0) => return true,
+                n if n == Num::Float(0 as f64) => return true,
+                _ => return false,
+            }
+        }
+        Type::Str(s) => return s == "",
+        Type::Boolean(b) => return b == false,
+        Type::Null => return true,
+        _ => false,
+    }
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Type::Signed(n) => write!(f, "{}", n),
-            Type::Float(n) => write!(f, "{}", n),
-            Type::Unsigned(n) => write!(f, "{}", n),
+            Type::Number(n) => {
+                match n {
+                    Num::Integer(n) => write!(f, "{}", n),
+                    Num::Float(n) => write!(f, "{}", n),
+                }
+            }
+            Type::Str(n) => write!(f, "{}", n),
+            Type::Boolean(b) => write!(f, "{}", b),
+            Type::Null => write!(f, "∅"),
         }
     }
 }
 
-// defining how adding and subtracting work in the type system
-// it covers ever single possible pair of types
-// im thinking of signed as negative numbers, and unsigned as positive numbers
-// since it helps me reason about what the results should be
-impl Add for Type {
-    type Output = Type;
-    fn add(self, other: Type) -> Type {
+impl fmt::Display for Num {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Num::Integer(n) => write!(f, "{}", n),
+            Num::Float(n) => write!(f, "{}", n),
+        }
+    }
+}
+
+impl Add for Num {
+    type Output = Num;
+    fn add(self, other: Num) -> Num {
         match (self, other) {
-            (Type::Signed(neg1), Type::Signed(neg2)) => {
-                let result = neg1 + neg2;
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Signed(neg), Type::Float(float)) => Type::Float((neg as f64) + float),
-            (Type::Signed(neg), Type::Unsigned(pos)) => {
-                let result = neg + (pos as i64);
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Float(float), Type::Signed(neg)) => Type::Float(float + (neg as f64)),
-            (Type::Float(float1), Type::Float(float2)) => Type::Float(float1 + float2),
-            (Type::Float(float), Type::Unsigned(pos)) => Type::Float(float + (pos as f64)),
+            (Num::Integer(n1), Num::Integer(n2)) => Num::Integer(n1 + n2),
+            (Num::Integer(n), Num::Float(f)) => Num::Float(n as f64 + f), 
 
-            (Type::Unsigned(pos), Type::Signed(neg)) => {
-                let result = (pos as i64) + neg;
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Unsigned(pos), Type::Float(float)) => Type::Float((pos as f64) + float),
-            (Type::Unsigned(pos1), Type::Unsigned(pos2)) => Type::Unsigned(pos1 + pos2),
+            (Num::Float(f1), Num::Float(f2)) => Num::Float(f1 + f2),
+            (Num::Float(f), Num::Integer(n)) => Num::Float(f + n as f64),
         }
     }
 }
-
-impl Sub for Type {
-    type Output = Type;
-    fn sub(self, other: Type) -> Type {
+impl Sub for Num {
+    type Output = Num;
+    fn sub(self, other: Num) -> Num {
         match (self, other) {
-            (Type::Signed(neg1), Type::Signed(neg2)) => {
-                let result = neg1 - neg2;
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Signed(neg), Type::Float(float)) => Type::Float((neg as f64) - float),
-            (Type::Signed(neg), Type::Unsigned(pos)) => {
-                let result = neg - (pos as i64);
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Float(float), Type::Signed(neg)) => Type::Float(float - (neg as f64)),
-            (Type::Float(float1), Type::Float(float2)) => Type::Float(float1 - float2),
-            (Type::Float(float), Type::Unsigned(pos)) => Type::Float(float - (pos as f64)),
+            (Num::Integer(n1), Num::Integer(n2)) => Num::Integer(n1 - n2),
+            (Num::Integer(n), Num::Float(f)) => Num::Float(n as f64 - f), 
 
-            (Type::Unsigned(pos), Type::Signed(neg)) => {
-                let result = (pos as i64) - neg;
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Unsigned(pos), Type::Float(float)) => Type::Float((pos as f64) - float),
-            (Type::Unsigned(pos1), Type::Unsigned(pos2)) => {
-                let result = (pos1 as i64) - (pos2 as i64);
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
+            (Num::Float(f1), Num::Float(f2)) => Num::Float(f1 - f2),
+            (Num::Float(f), Num::Integer(n)) => Num::Float(f - n as f64),
         }
     }
 }
-
-impl Mul for Type {
-    type Output = Type;
-    fn mul(self, other: Type) -> Type {
+impl Mul for Num {
+    type Output = Num;
+    fn mul(self, other: Num) -> Num {
         match (self, other) {
-            (Type::Signed(neg1), Type::Signed(neg2)) => {
-                let result = neg1 * neg2;
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Signed(neg), Type::Float(float)) => Type::Float((neg as f64) * float),
-            (Type::Signed(neg), Type::Unsigned(pos)) => {
-                let result = neg * (pos as i64);
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Float(float), Type::Signed(neg)) => Type::Float(float * (neg as f64)),
-            (Type::Float(float1), Type::Float(float2)) => Type::Float(float1 * float2),
-            (Type::Float(float), Type::Unsigned(pos)) => Type::Float(float * (pos as f64)),
+            (Num::Integer(n1), Num::Integer(n2)) => Num::Integer(n1 * n2),
+            (Num::Integer(n), Num::Float(f)) => Num::Float(n as f64 * f), 
 
-            (Type::Unsigned(pos), Type::Signed(neg)) => {
-                let result = (pos as i64) * neg;
-                if result < 0 {
-                    Type::Signed(result)
-                } else {
-                    Type::Unsigned(result as usize)
-                }
-            }
-            (Type::Unsigned(pos), Type::Float(float)) => Type::Float((pos as f64) * float),
-            (Type::Unsigned(pos1), Type::Unsigned(pos2)) => Type::Unsigned(pos1 * pos2),
+            (Num::Float(f1), Num::Float(f2)) => Num::Float(f1 * f2),
+            (Num::Float(f), Num::Integer(n)) => Num::Float(f * n as f64),
         }
     }
 }
 
-impl Div for Type {
-    type Output = Type;
-    fn div(self, other: Type) -> Type {
+impl Div for Num {
+    type Output = Num;
+    fn div(self, other: Num) -> Num {
         match (self, other) {
-            (Type::Signed(neg1), Type::Signed(neg2)) => Type::Float((neg1 / neg2) as f64),
-            (Type::Signed(neg), Type::Float(float)) => Type::Float(neg as f64 / float),
-            (Type::Signed(neg), Type::Unsigned(pos)) => Type::Float(neg as f64 / pos as f64),
+            (Num::Integer(n1), Num::Integer(n2)) => Num::Float((n1 / n2) as f64),
+            (Num::Integer(n), Num::Float(f)) => Num::Float(n as f64 / f), 
 
-            (Type::Float(float), Type::Signed(neg)) => Type::Float(float / neg as f64),
-            (Type::Float(float1), Type::Float(float2)) => Type::Float(float1 / float2),
-            (Type::Float(float), Type::Unsigned(pos)) => Type::Float(float / pos as f64),
-
-            (Type::Unsigned(pos), Type::Signed(neg)) => Type::Float(pos as f64 / neg as f64),
-            (Type::Unsigned(pos), Type::Float(float)) => Type::Float(pos as f64 / float),
-            (Type::Unsigned(pos1), Type::Unsigned(pos2)) => Type::Float(pos1 as f64 / pos2 as f64),
+            (Num::Float(f1), Num::Float(f2)) => Num::Float(f1 / f2),
+            (Num::Float(f), Num::Integer(n)) => Num::Float(f / n as f64),
         }
     }
 }
 
-impl PartialEq for Type {
-    // NOTE: this takes references to the values in a comparison, 
-    // that way I don't have to think about whether `==` takes ownership of the values
-    // sounds like it'd be janky if it did
-    fn eq(&self, other: &Type) -> bool {
-        // self is the left value type, other is the right value type in an equality check
+impl PartialEq for Num {
+    fn eq(&self, other: &Num) -> bool {
         match (self, other) {
-            (Type::Signed(left), Type::Signed(right)) => left == right,
-            // you have to dereference in order to do the type conversion
-            // otherwise I believe you are converting the literal reference and not the value
-            (Type::Signed(left), Type::Float(right)) => (*left as f64) == *right,
-            (Type::Signed(left), Type::Unsigned(right)) => *left == (*right as i64),
+            (Num::Integer(left), Num::Integer(right)) => left == right,
+            (Num::Integer(left), Num::Float(right)) => (*left as f64) == *right,
 
-            (Type::Float(left), Type::Signed(right)) => *left == (*right as f64),
-            (Type::Float(left), Type::Float(right)) => left == right,
-            (Type::Float(left), Type::Unsigned(right)) => *left == (*right as f64),
-
-            (Type::Unsigned(left), Type::Signed(right)) => (*left as i64) == *right,
-            (Type::Unsigned(left), Type::Float(right)) => (*left as f64) == *right,
-            (Type::Unsigned(left), Type::Unsigned(right)) => left == right,
+            (Num::Float(left), Num::Float(right)) => left == right,
+            (Num::Float(left), Num::Integer(right)) => *left == (*right as f64),
         }
     }
 }
 
-impl PartialOrd for Type {
+impl PartialOrd for Num {
     // same thing, takes references to the values in the comparison
-    fn partial_cmp(&self, other: &Type) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Num) -> Option<Ordering> {
         // partial_cmp returns an Option<Ordering>
         // Ordering is an enum that contains if the left value was greater than/less than... whatever
         match (self, other) {
-            (Type::Signed(left), Type::Signed(right)) => left.partial_cmp(right),
-            (Type::Signed(left), Type::Float(right)) => (*left as f64).partial_cmp(right),
-            // dereferenes to the the type conversion, then the partial_cmp will take reference to
-            // the converted value
-            (Type::Signed(left), Type::Unsigned(right)) => left.partial_cmp(&(*right as i64)),
+            (Num::Integer(left), Num::Integer(right)) => left.partial_cmp(right),
+            (Num::Integer(left), Num::Float(right)) => (*left as f64).partial_cmp(right),
 
-            (Type::Float(left), Type::Signed(right)) => left.partial_cmp(&(*right as f64)),
-            (Type::Float(left), Type::Float(right)) => left.partial_cmp(right),
-            (Type::Float(left), Type::Unsigned(right)) => left.partial_cmp(&(*right as f64)),
-
-            (Type::Unsigned(left), Type::Signed(right)) => (*left as i64).partial_cmp(right),
-            (Type::Unsigned(left), Type::Float(right)) => (*left as f64).partial_cmp(right),
-            (Type::Unsigned(left), Type::Unsigned(right)) => left.partial_cmp(right),
+            (Num::Float(left), Num::Float(right)) => left.partial_cmp(right),
+            (Num::Float(left), Num::Integer(right)) => left.partial_cmp(&(*right as f64)),
         }
     }
 }

@@ -22,86 +22,77 @@ pub fn show_stack_debug(stack: &Vec<Type>) {
     println!("STACK TRACE: {}", output);
 }
 
+fn destructure_number(n: Type) -> Num {
+    match n {
+        Type::Number(n) => return n,
+        _ => panic!("Expected number"),
+        
+    }
+}
 macro_rules! pop {
     ($stack:expr) => {
-        $stack.pop().expect("stack underflow")
+        $stack.pop().expect("stack underflow").clone()
+    };
+}
+macro_rules! pop_num {
+    ($stack:expr) => {
+        destructure_number($stack.pop().expect("stack underflow"))
     };
 }
 
 pub fn OP_ADD(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(y + x)
+    stack.push(Type::Number(y + x))
 }
 pub fn OP_SUB(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(y - x)
+    stack.push(Type::Number(y - x))
 }
 pub fn OP_MUL(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(y * x)
+    stack.push(Type::Number(y * x))
 }
 pub fn OP_DIV(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(y / x)
-}
-pub fn OP_TOSIGNED(stack: &mut Vec<Type>) {
-    match pop!(stack) {
-        Type::Unsigned(n) => stack.push(Type::Unsigned(n as usize)),
-        Type::Signed(n) => stack.push(Type::Unsigned(n as usize)),
-        Type::Float(n) => stack.push(Type::Unsigned(n as usize)),
-    }
-}
-pub fn OP_TOUNSIGNED(stack: &mut Vec<Type>) {
-    match pop!(stack) {
-        Type::Unsigned(n) => stack.push(Type::Signed(n as i64)),
-        Type::Signed(n) => stack.push(Type::Signed(n as i64)),
-        Type::Float(n) => stack.push(Type::Signed(n as i64)),
-    }
-}
-pub fn OP_TOFLOAT(stack: &mut Vec<Type>) {
-    match pop!(stack) {
-        Type::Unsigned(n) => stack.push(Type::Float(n as f64)),
-        Type::Signed(n) => stack.push(Type::Float(n as f64)),
-        Type::Float(n) => stack.push(Type::Float(n as f64)),
-    }
+    stack.push(Type::Number(y / x))
 }
 pub fn OP_EQ(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(Type::Unsigned((y == x) as usize))
+    stack.push(Type::Boolean(y == x))
 }
 pub fn OP_GT(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(Type::Unsigned((y > x) as usize))
+    stack.push(Type::Boolean(y > x))
 }
 pub fn OP_LT(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(Type::Unsigned((y < x) as usize))
+    stack.push(Type::Boolean(y < x))
 }
 pub fn OP_GTEQ(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(Type::Unsigned((y >= x) as usize))
+    stack.push(Type::Boolean(y <= x));
 }
 pub fn OP_LTEQ(stack: &mut Vec<Type>) {
-    let x = pop!(stack);
-    let y = pop!(stack);
+    let x = pop_num!(stack);
+    let y = pop_num!(stack);
 
-    stack.push(Type::Unsigned((y <= x) as usize))
+    stack.push(Type::Boolean(y >= x));
 }
 pub fn OP_OUT(stack: &mut Vec<Type>) {
     let x = pop!(stack);
@@ -110,7 +101,7 @@ pub fn OP_OUT(stack: &mut Vec<Type>) {
 }
 pub fn OP_DUP(stack: &mut Vec<Type>) {
     let x = pop!(stack);
-    stack.push(x);
+    stack.push(x.clone());
     stack.push(x);
 }
 pub fn OP_SWAP(stack: &mut Vec<Type>) {
@@ -120,12 +111,12 @@ pub fn OP_SWAP(stack: &mut Vec<Type>) {
     stack.push(y);
 }
 pub fn OP_DROP(stack: &mut Vec<Type>) {
-    pop!(stack);
+    pop_num!(stack);
 }
 pub fn OP_OVER(stack: &mut Vec<Type>) {
     let x = pop!(stack);
     let y = pop!(stack);
-    stack.push(y);
+    stack.push(y.clone());
     stack.push(x);
     stack.push(y);
 }
@@ -136,4 +127,8 @@ pub fn OP_ROTATE(stack: &mut Vec<Type>) {
     stack.push(y);
     stack.push(x);
     stack.push(z);
+}
+pub fn OP_READ(stack: &mut Vec<Type>, idx: usize, mem_ptr: &mut [u64; 100]) {
+}
+pub fn OP_WRITE(stack: &mut Vec<Type>, idx: usize, mem_ptr: &mut [u64; 100]) {
 }

@@ -1,11 +1,11 @@
 #![allow(warnings)]
 use std::io::{self, Write};
 use std::env;
-use std::alloc::{alloc, dealloc, Layout};
-use std::ptr;
 use std::fs::File;
 use std::io::Read;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::mem;
 
 mod operations;
 pub use operations::*;
@@ -14,36 +14,33 @@ pub use types::*;
 
 #[derive(Debug)]
 enum Op<'a> {
-    PushPos(usize),
-    PushNeg(i64),
+    PushInteger(i64),
     PushFloat(f64),
-    PushStr(&'a str),
+    PushStr(Box<String>),
+    PushBool(bool),
     Add,
     Sub,
     Mul,
     Div,
-    To_signed,
-    To_unsigned,
-    To_float,
     Eq, // pop stack twice - push 1 or 0
     Gt, // greater than
     Lt, // less than
     Gteq, // >= 
     Lteq, // <=
-//    Or, // pop twice, if at least 1 is not 0, push 1 to stack
-//    And, // pop twice, if both are not 0, push 1 to stack
-//    Not, // pop stack, if >0 push 0, else push 1
     Dup, // Duplicate value on the top of the stack
     Swap, // swap 2 values on top of stack
     Drop, // remove value on top of stack
     Over, // copy element on bottom of the stack to the top of the stack 
     Rotate, // rotate 3 values on top of the stack, a b c - b c a
     Out, // pop stack - print to console
+    Defvar(&'a str),
+    Readvar(&'a str),
+    Writevar(&'a str),
     If(usize), // pop stack - if 0 jump to end, otherwise proceed
     Ifstar(usize), // used in else-if blocks
     Else(usize), // unconditional jump instruction
     End(usize), // unconditional jump instruction
-    While, // just a labe
+    While, // just a label
     Do(usize), // pop stack - if 0 jump to end, otherwise proceed, same as `if` but has different rules
     Defword(usize), // unconditional jump
     Return, // jump based on return stack
@@ -54,8 +51,10 @@ enum Op<'a> {
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Token {
     Num,
+    Bool,
     Str,
     Word,
+    VarOp, // an operation that acts on a variable
 }
 
 fn remove_comments(source: &String) -> String {
@@ -78,7 +77,7 @@ fn remove_comments(source: &String) -> String {
 fn find_end_str(source: &String, mut idx: usize) -> usize {
     loop {
         let char = source.chars().nth(idx).expect("Unclosed String");
-        let peek = source.chars().nth(idx+1).expect("Problem with find_end_str()");
+        let peek = source.chars().nth(idx+1).expect("Unclosed String");
 
         if char == '"' {
             if !peek.is_whitespace() {
@@ -91,7 +90,6 @@ fn find_end_str(source: &String, mut idx: usize) -> usize {
     return idx;
 }
 
-
 fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
     // helper function to identify token types
     let is_num = |w: &str| {
@@ -101,6 +99,7 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
            _ => false,
         }
     };
+    let is_bool = |w: &str| w.parse::<bool>().is_ok() == true;
 
     let mut result: Vec<(&str, usize, usize, Token)> = vec![];
     let mut word_start = None;
@@ -128,6 +127,11 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
                 let token_literal = &source[start..i];
                 if is_num(token_literal) {
                     result.push((token_literal, line_no, col, Token::Num));
+                } else if is_bool(token_literal) {
+                    result.push((token_literal, line_no, col, Token::Bool));
+                } else if token_literal.chars().nth(0).unwrap() == '@' ||
+                          token_literal.chars().nth(0).unwrap() == '!' {
+                    result.push((token_literal, line_no, col, Token::VarOp));
                 } else {
                     result.push((token_literal, line_no, col, Token::Word));
                 }
@@ -157,6 +161,7 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
     let mut program: Vec<Op> = vec![];
     let mut i = 0;
     let mut dict: HashMap<&str, usize> = HashMap::new();
+
     while !source.is_empty() {
         let (literal, line, col, token) = source.remove(0);
         if token == Token::Word {
@@ -165,9 +170,6 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                 "-" => program.push(Op::Sub),
                 "*" => program.push(Op::Mul),
                 "/" => program.push(Op::Div),
-                "to_signed" => program.push(Op::To_signed),
-                "to_unsigned" => program.push(Op::To_unsigned),
-                "to_float" => program.push(Op::To_float),
                 "=" => program.push(Op::Eq),
                 ">" => program.push(Op::Gt),
                 "<" => program.push(Op::Lt),
@@ -179,6 +181,10 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                 "drop" => program.push(Op::Drop),
                 "over" => program.push(Op::Over),
                 "rotate" => program.push(Op::Rotate),
+                "defvar" => {
+                    let (var_name, _, _, _) = source.remove(0);
+                    program.push(Op::Defvar(var_name));
+                }
                 "if" => {
                     program.push(Op::If(0));
                     jump_locations.push(i);
@@ -286,20 +292,34 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
             }
         } else if token == Token::Num {
             // helper functions to parse integers that are strings
-            let is_positive = |n: &str| n.parse::<usize>().is_ok();
-            let to_positive = |n: &str| n.parse::<usize>().unwrap();
-            let is_negative = |n: &str| n.parse::<i64>().is_ok();
-            let to_negative = |n: &str| n.parse::<i64>().unwrap();
+            let is_int = |n: &str| n.parse::<i64>().is_ok();
+            let to_int = |n: &str| n.parse::<i64>().unwrap();
             let is_float = |n: &str| n.parse::<f64>().is_ok();
             let to_float = |n: &str| n.parse::<f64>().unwrap();
             match literal {
-                n if is_positive(n) => program.push(Op::PushPos(to_positive(n))),
-                n if is_negative(n) => program.push(Op::PushNeg(to_negative(n))),
+                n if is_int(n) => program.push(Op::PushInteger(to_int(n))),
                 n if is_float(n) => program.push(Op::PushFloat(to_float(n))),
                 _ => panic!("something went wrong in parse_to_program() when matching the numbers"),
             }
+        } else if token == Token::Bool {
+
+            let to_bool = |b: &str| b.parse::<bool>().unwrap();
+            program.push(Op::PushBool(to_bool(literal)))
+
         } else if token == Token::Str {
-            program.push(Op::PushStr(literal));
+
+            let str = String::from(literal);
+            program.push(Op::PushStr(Box::new(str)));
+
+        } else if token == Token::VarOp {
+
+            let var_name = &literal[1..literal.len()];
+
+            if literal.chars().nth(0).unwrap() == '@' {
+                program.push(Op::Writevar(var_name))
+            } else if literal.chars().nth(0).unwrap() == '!' {
+                program.push(Op::Readvar(var_name))
+            }
         }
         i+=1;
     }
@@ -321,23 +341,26 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
 fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
     // `ip` stands for `instruction pointer`
     let mut return_stack: Vec<usize> = vec![];
+    let mut mem: HashMap<&str, Type> = HashMap::new(); // this is where the variables are stored
     let mut ip = 0;
     while ip < program.len() {
         match program[ip] {
-            Op::PushNeg(n) => {
-                s.push(Type::Signed(n));
+            Op::PushInteger(n) => {
+                s.push(Type::Number(Num::Integer(n)));
                 ip+=1;
             }
             Op::PushFloat(f) => {
-                s.push(Type::Float(f));
+                s.push(Type::Number(Num::Float(f)));
                 ip+=1;
             }
-            Op::PushPos(u) => {
-                s.push(Type::Unsigned(u));
+            Op::PushBool(b) => {
+                s.push(Type::Boolean(b));
                 ip+=1;
             }
-            Op::PushStr(string) => {
-                panic!("Not Implemented")
+            Op::PushStr(ref string) => {
+                s.push(Type::Str((**string).clone()));
+                // keep an eye on this i dunno if the original string gets dropped
+                ip+=1;
             }
             Op::Add => {
                 OP_ADD(s);
@@ -353,18 +376,6 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
             }
             Op::Div => {
                 OP_DIV(s);
-                ip+=1;
-            }
-            Op::To_unsigned => {
-                OP_TOSIGNED(s);
-                ip+=1;
-            }
-            Op::To_signed => {
-                OP_TOUNSIGNED(s);
-                ip+=1;
-            }
-            Op::To_float => {
-                OP_TOFLOAT(s);
                 ip+=1;
             }
             Op::Eq => {
@@ -411,10 +422,28 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
                 OP_ROTATE(s);
                 ip+=1;
             }
+            Op::Defvar(var_name) => {
+                mem.insert(var_name, Type::Null);
+                ip+=1;
+            }
+            Op::Writevar(var_name) => {
+                match mem.entry(var_name) {
+                    Entry::Occupied(mut var) => var.insert(s.pop().expect("stack underflow")),
+                    _ => panic!("Variable {} has not beed initialized", var_name)
+                };
+                ip+=1;
+            }
+            Op::Readvar(var_name) => {
+                if let Some(val) = mem.get(var_name) {
+                    s.push(val.clone());
+                } else {
+                    panic!("Variable {} has not been initialized", var_name);
+                }
+                ip+=1;
+            }
             Op::If(label) => {
-                let x = s.pop().expect("stack underflow");
-                if x == Type::Unsigned(0) { // condition is false
-                    // jump to label
+                let x = s.pop().expect("stack underflowww");
+                if is_falsy(x) {
                     ip = label;
                 } else {
                     ip+=1;
@@ -422,8 +451,7 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
             }
             Op::Ifstar(label) => {
                 let x = s.pop().expect("stack underflow");
-                if x == Type::Unsigned(0) { // condition is false
-                    // jump to label
+                if is_falsy(x) {
                     ip = label;
                 } else {
                     ip+=1;
@@ -434,8 +462,8 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
             Op::While => ip+=1, // doesnt do anything, just a label to jump to
             Op::Do(label) => {
                 let x = s.pop().expect("stack underflow");
-                if x == Type::Unsigned(0) { // loop condition is false
-                    ip = label // jump to end
+                if is_falsy(x) {
+                    ip = label;
                 } else {
                     ip+=1;
                 }
@@ -457,10 +485,9 @@ fn main() {
     if args.len() == 1 {
         let mut input = String::new();
         let mut stack: Vec<Type> = vec![];
+        //let mut memory: [u64; 100] = [0; 100];
 
         println!("\nWelcome to Bombo's Forth Interactive Environment Repl");
-        println!("Note that accessing memory can be quite janky in the REPL");
-        println!("Just have fun with it, the REPL is only for getting a feel for things");
         loop {
             print!("\n>> "); // prompt
             io::stdout().flush().unwrap();
@@ -469,8 +496,8 @@ fn main() {
             
             let mut tokens = tokenize(&input);
             let program = parse_to_program(&mut tokens);
-            run(&program, &mut stack);
             println!("{:?}", program);
+            run(&program, &mut stack);
             show_stack_debug(&stack);
             input.clear();
         }
