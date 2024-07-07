@@ -5,7 +5,6 @@ use std::fs::File;
 use std::io::Read;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::mem;
 
 mod operations;
 pub use operations::*;
@@ -16,7 +15,7 @@ pub use types::*;
 enum Op<'a> {
     PushInteger(i64),
     PushFloat(f64),
-    PushStr(Box<String>),
+    PushStr(&'a str),
     PushBool(bool),
     Add,
     Sub,
@@ -55,6 +54,8 @@ enum Token {
     Str,
     Word,
     VarOp, // an operation that acts on a variable
+    List,
+    Struct,
 }
 
 fn remove_comments(source: &String) -> String {
@@ -90,6 +91,30 @@ fn find_end_str(source: &String, mut idx: usize) -> usize {
     return idx;
 }
 
+fn find_end_list(source: &String, mut idx: usize) -> usize {
+    let mut stack: Vec<bool> = vec![true];
+    loop {
+        let char = source.chars().nth(idx).expect("Unclosed List");
+        let peek = source.chars().nth(idx+1).expect("Unclosed List");
+
+        if char == '[' {
+            stack.push(true);
+        } else if char == ']' {
+            stack.pop();
+        }
+
+        if stack.is_empty() {
+            if !peek.is_whitespace() {
+                panic!("Found unexpected character `{}` after list", peek);
+            }
+            break;
+        }
+        idx+=1;
+    }
+    return idx;
+}
+
+
 fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
     // helper function to identify token types
     let is_num = |w: &str| {
@@ -111,13 +136,19 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
     while i < source.len() {
         let char = source.chars().nth(i).unwrap();
 
-        match (char.is_whitespace(), word_start, char == '"') {
+        match (char.is_whitespace(), word_start, char == '"' || char == '[') {
             (false, None, false) => {
                 word_start = Some((i, column_no));
             }
             (false, None, true) => {
-                let end = find_end_str(source, i+1);
-                result.push((&source[(i+1)..end], line_no, column_no, Token::Str));
+                let mut end = 0;
+                if char == '"' {
+                    end = find_end_str(source, i+1);
+                    result.push((&source[(i+1)..end], line_no, column_no, Token::Str));
+                } else if char == '[' {
+                    end = find_end_list(source, i+1);
+                    result.push((&source[i..end+1], line_no, column_no, Token::List));
+                }
                 i = end;
                 column_no = i+1;
                 // column numbering starts at 1, `i` and `end` are full string indexes
@@ -142,7 +173,7 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
                     line_no += 1;
                 }
             }
-            (_, Some((_, _)), true) => panic!("found unexpected `\"` in word"),
+            (_, Some((_, _)), true) => panic!("found unexpected {} in word", char),
             (true, _, _) if char == '\n' => {
                 column_no = 0;
                 line_no += 1;
@@ -308,8 +339,7 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
 
         } else if token == Token::Str {
 
-            let str = String::from(literal);
-            program.push(Op::PushStr(Box::new(str)));
+            program.push(Op::PushStr(literal));
 
         } else if token == Token::VarOp {
 
@@ -357,9 +387,8 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
                 s.push(Type::Boolean(b));
                 ip+=1;
             }
-            Op::PushStr(ref string) => {
-                s.push(Type::Str((**string).clone()));
-                // keep an eye on this i dunno if the original string gets dropped
+            Op::PushStr(string) => {
+                s.push(Type::Str(String::from(string)));
                 ip+=1;
             }
             Op::Add => {
@@ -495,6 +524,7 @@ fn main() {
                        .expect("failed"); // read input to buffer
             
             let mut tokens = tokenize(&input);
+            println!("{:?}", tokens);
             let program = parse_to_program(&mut tokens);
             println!("{:?}", program);
             run(&program, &mut stack);

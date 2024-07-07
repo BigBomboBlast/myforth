@@ -128,7 +128,3 @@ pub fn OP_ROTATE(stack: &mut Vec<Type>) {
     stack.push(x);
     stack.push(z);
 }
-pub fn OP_READ(stack: &mut Vec<Type>, idx: usize, mem_ptr: &mut [u64; 100]) {
-}
-pub fn OP_WRITE(stack: &mut Vec<Type>, idx: usize, mem_ptr: &mut [u64; 100]) {
-}
