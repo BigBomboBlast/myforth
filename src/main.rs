@@ -17,6 +17,7 @@ enum Op<'a> {
     PushFloat(f64),
     PushStr(&'a str),
     PushBool(bool),
+    PushList(Vec<Type>),
     Add,
     Sub,
     Mul,
@@ -186,6 +187,73 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
     return result;
 }
 
+fn split_str_to_list(list_as_str: &String) -> Vec<&str> {
+    // "[1 2 [3 4]]" becomes "[ 1 2 [ 3 4 ] ]"
+    let mut start = None;
+    let mut result: Vec<&str> = vec![];
+    let mut i = 0; 
+    while i < list_as_str.len() {
+        let char = list_as_str.chars().nth(i).unwrap();
+        match (char.is_whitespace(), start, char == '"') {
+            (false, None, false) => {
+                start = Some(i);
+            }
+            (false, None, true) => {
+                let end = find_end_str(list_as_str, i+1);
+                result.push(&list_as_str[i..end+1]);
+                i = end;
+                start = None;
+            }
+            (true, Some(n), false) => {
+                result.push(&list_as_str[n..i]);
+                start = None;
+            }
+            (_, Some(_), true) => panic!("found unexpected {} in list", char),
+            _ => (),
+        }
+        i+=1;
+    }
+
+    return result;
+}
+
+fn parse_to_num(n: &str) -> Num { 
+    match n {
+        n if n.parse::<i64>().is_ok() => Num::Integer(n.parse::<i64>().unwrap()),
+        n if n.parse::<f64>().is_ok() => Num::Float(n.parse::<f64>().unwrap()),
+        _ => panic!("uh oh"),
+    }
+}
+
+fn is_str(s: &str) -> bool {
+    if s.chars().nth(0).expect("1") == '"' && 
+       s.chars().nth(s.len()-1).expect("2") == '"' {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+fn get_nested_list(split: &mut Vec<&str>) -> Vec<Type> {
+    let mut nested_list: Vec<Type> = vec![];
+
+    while !split.is_empty() {
+        let current = split.remove(0);
+        match current {
+            "[" => nested_list.push(Type::List(get_nested_list(split))),
+            "]" => break,
+            n if n.parse::<f64>().is_ok() => nested_list.push(Type::Number(parse_to_num(n))),
+            s if is_str(s) =>{
+                let quotes_removed = &s[1..s.len()-1];
+                nested_list.push(Type::Str(String::from(quotes_removed)));
+            }
+            b if b.parse::<bool>().is_ok() => nested_list.push(Type::Boolean(b.parse::<bool>().unwrap())),
+            _ => panic!("expected valid type in list, got {}", current),
+        }
+    }
+    return nested_list;
+}
+
 fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> Vec<Op<'a>> {
     let error_reference = source.clone(); // I need this for error referencing, since I consume tokens using .remove(0)
     let mut jump_locations: Vec<usize> = vec![];
@@ -341,6 +409,13 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
 
             program.push(Op::PushStr(literal));
 
+        } else if token == Token::List {
+   
+            let mut str_ref = String::from(literal.replace("[", "[ ",).replace("]", " ]"));
+            str_ref.push(' ');
+            let mut thing = split_str_to_list(&str_ref);
+            program.push(Op::PushList(get_nested_list(&mut thing)));
+
         } else if token == Token::VarOp {
 
             let var_name = &literal[1..literal.len()];
@@ -389,6 +464,10 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
             }
             Op::PushStr(string) => {
                 s.push(Type::Str(String::from(string)));
+                ip+=1;
+            }
+            Op::PushList(ref list) => {
+                s.push(list[0].clone());
                 ip+=1;
             }
             Op::Add => {

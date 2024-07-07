@@ -14,6 +14,7 @@ pub enum Type {
     Boolean(bool),
     Number(Num),
     Str(String),
+    List(Vec<Type>),
 }
 
 pub fn is_falsy(t: Type) -> bool {
@@ -32,6 +33,16 @@ pub fn is_falsy(t: Type) -> bool {
     }
 }
 
+pub fn show_list(stack: &Vec<Type>) {
+    let mut output = String::from("[ ");
+    for v in stack {
+        let val = format!("{} ", v);
+        output.push_str(&val);
+    }
+    output.push(']');
+    println!("STACK TRACE: {}", output);
+}
+
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -44,6 +55,9 @@ impl fmt::Display for Type {
             Type::Str(n) => write!(f, "{}", n),
             Type::Boolean(b) => write!(f, "{}", b),
             Type::Null => write!(f, "∅"),
+            Type::List(l) => {
+                write!(f, "{:?}", l)
+            }
         }
     }
 }
