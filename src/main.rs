@@ -33,6 +33,7 @@ enum Op<'a> {
     Over, // copy element on bottom of the stack to the top of the stack 
     Rotate, // rotate 3 values on top of the stack, a b c - b c a
     Out, // pop stack - print to console
+    Index,
     Defvar(&'a str),
     Readvar(&'a str),
     Writevar(&'a str),
@@ -280,6 +281,7 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                 "drop" => program.push(Op::Drop),
                 "over" => program.push(Op::Over),
                 "rotate" => program.push(Op::Rotate),
+                "idx" => program.push(Op::Index),
                 "defvar" => {
                     let (var_name, _, _, _) = source.remove(0);
                     program.push(Op::Defvar(var_name));
@@ -528,6 +530,10 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
             }
             Op::Rotate => {
                 OP_ROTATE(s);
+                ip+=1;
+            }
+            Op::Index => {
+                OP_INDEX(s);
                 ip+=1;
             }
             Op::Defvar(var_name) => {

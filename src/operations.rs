@@ -128,3 +128,14 @@ pub fn OP_ROTATE(stack: &mut Vec<Type>) {
     stack.push(x);
     stack.push(z);
 }
+pub fn OP_INDEX(stack: &mut Vec<Type>) {
+    if let Num::Integer(n) = pop_num!(stack) {
+        if let Type::List(y) = pop!(stack) {
+            stack.push(y[n as usize].clone())
+        } else {
+            panic!("Expected List")
+        }
+    } else {
+        panic!("Expected integer to index list")
+    }
+}
