@@ -22,6 +22,7 @@ enum Op<'a> {
     Sub,
     Mul,
     Div,
+    Floor,
     Eq, // pop stack twice - push 1 or 0
     Gt, // greater than
     Lt, // less than
@@ -189,7 +190,6 @@ fn tokenize(source: &String) -> Vec<(&str, usize, usize, Token)> {
 }
 
 fn split_str_to_list(list_as_str: &String) -> Vec<&str> {
-    // "[1 2 [3 4]]" becomes "[ 1 2 [ 3 4 ] ]"
     let mut start = None;
     let mut result: Vec<&str> = vec![];
     let mut i = 0; 
@@ -281,6 +281,7 @@ fn parse_to_program<'a>(source: &'a mut Vec<(&'a str, usize, usize, Token)>) -> 
                 "drop" => program.push(Op::Drop),
                 "over" => program.push(Op::Over),
                 "rotate" => program.push(Op::Rotate),
+                "floor" => program.push(Op::Floor),
                 "idx" => program.push(Op::Index),
                 "defvar" => {
                     let (var_name, _, _, _) = source.remove(0);
@@ -530,6 +531,10 @@ fn run(program: &Vec<Op>, s: &mut Vec<Type>) {
             }
             Op::Rotate => {
                 OP_ROTATE(s);
+                ip+=1;
+            }
+            Op::Floor => {
+                OP_FLOOR(s);
                 ip+=1;
             }
             Op::Index => {

@@ -64,6 +64,13 @@ pub fn OP_DIV(stack: &mut Vec<Type>) {
 
     stack.push(Type::Number(y / x))
 }
+pub fn OP_FLOOR(stack: &mut Vec<Type>) {
+    let num = pop_num!(stack);
+    match num {
+        Num::Float(x) => stack.push(Type::Number(Num::Integer(x as i64))),
+        Num::Integer(x) => stack.push(Type::Number(num)),
+    }
+}
 pub fn OP_EQ(stack: &mut Vec<Type>) {
     let x = pop_num!(stack);
     let y = pop_num!(stack);
